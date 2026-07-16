@@ -1,0 +1,6 @@
+{
+  "name": "AI Binary Options Trader Simulator",
+  "description": "สุดยอดระบบวิเคราะห์และจำลองการเทรดทองคำ (XAUUSD) ด้วย AI Quantitative Trader ระดับโลก วิเคราะห์ข้อมูลแท่งเทียน 1 นาทีแบบเรียลไทม์",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

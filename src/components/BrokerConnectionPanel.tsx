@@ -70,6 +70,10 @@ export default function BrokerConnectionPanel({
     ? `${window.location.origin}/api/mt5/signals` 
     : "http://localhost:3000/api/mt5/signals";
 
+  const localWebhookUrl = typeof window !== "undefined" 
+    ? `${window.location.origin}/api/mt5/signal-webhook` 
+    : "http://localhost:3000/api/mt5/signal-webhook";
+
   const mql5Code = `//+------------------------------------------------------------------+
 //|                                                AI_Gold_Trader.mq5 |
 //|                                  Copyright 2026, AI Quant Trader |
@@ -77,14 +81,17 @@ export default function BrokerConnectionPanel({
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, AI Quant Trader"
 #property link      "https://ai.studio/"
-#property version   "1.00"
+#property version   "2.00"
 #property strict
 
 //--- input parameters
-input string   InpSignalUrl = "${localSignalUrl}"; // AI Signal API URL
-input double   InpLotSize   = 0.10;                  // Default Lot Size
-input int      InpSlippage  = 30;                    // Slippage in points
-input int      InpMagic     = 123456;                // Magic Number
+input string   InpWebhookUrl      = "${localWebhookUrl}"; // AI Webhook URL
+input double   InpLotSize         = 0.10;                   // Default Lot Size
+input int      InpDefaultSLPips   = 100;                    // Default Stop Loss in Pips
+input int      InpDefaultTPPips   = 200;                    // Default Take Profit in Pips
+input int      InpSlippage        = 30;                     // Slippage in points
+input int      InpMagic           = 123456;                 // Magic Number
+input int      InpPollIntervalSec = 15;                     // Sync interval (seconds)
 
 datetime last_trade_time = 0;
 
@@ -92,8 +99,9 @@ datetime last_trade_time = 0;
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit() {
-   Print("AI Gold Trader EA Initialized. Polling URL: ", InpSignalUrl);
-   EventSetTimer(30); // Poll every 30 seconds
+   Print("AI Gold Trader EA v2.0 Initialized.");
+   Print("Syncing Live Balance & Candles to: ", InpWebhookUrl);
+   EventSetTimer(InpPollIntervalSec); // Sync periodically
    return(INIT_SUCCEEDED);
 }
 
@@ -105,51 +113,175 @@ void OnDeinit(const int reason) {
 }
 
 //+------------------------------------------------------------------+
-//| Timer function to poll signals                                   |
+//| Helper to parse double value from JSON manually                  |
+//+------------------------------------------------------------------+
+double JsonGetDouble(string json, string key, double default_val) {
+   string search_key = "\\"" + key + "\\":";
+   int index = StringFind(json, search_key);
+   if(index < 0) return default_val;
+   
+   int start = index + StringLen(search_key);
+   while(start < StringLen(json) && (StringGetCharacter(json, start) == ' ' || StringGetCharacter(json, start) == ':')) {
+      start++;
+   }
+   
+   int end = start;
+   while(end < StringLen(json)) {
+      ushort c = StringGetCharacter(json, end);
+      if((c >= '0' && c <= '9') || c == '.' || c == '-') {
+         end++;
+      } else {
+         break;
+      }
+   }
+   
+   if(end > start) {
+      string val_str = StringSubstr(json, start, end - start);
+      return StringToDouble(val_str);
+   }
+   return default_val;
+}
+
+//+------------------------------------------------------------------+
+//| Helper to parse int value from JSON manually                     |
+//+------------------------------------------------------------------+
+int JsonGetInt(string json, string key, int default_val) {
+   return (int)JsonGetDouble(json, key, default_val);
+}
+
+//+------------------------------------------------------------------+
+//| Timer function to send data & fetch signals                      |
 //+------------------------------------------------------------------+
 void OnTimer() {
-   char post[], result[];
-   string headers = "Content-Type: application/json\\r\\n";
-   string result_headers;
+   // 1. Fetch recent candlestick rates (last 30 candles)
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   int copied = CopyRates(_Symbol, _Period, 0, 30, rates);
+   if(copied <= 0) {
+      Print("Failed to copy chart rates for ", _Symbol);
+      return;
+   }
    
-   int res = WebRequest("GET", InpSignalUrl, headers, 15000, post, result, result_headers);
+   // 2. Build Candles JSON array
+   string candles_json = "[";
+   for(int i = copied - 1; i >= 0; i--) {
+      string candle = "{\\"time\\":\\"" + TimeToString(rates[i].time, TIME_DATE|TIME_MINUTES) + "\\"," +
+                      "\\"open\\":" + DoubleToString(rates[i].open, _Digits) + "," +
+                      "\\"high\\":" + DoubleToString(rates[i].high, _Digits) + "," +
+                      "\\"low\\":" + DoubleToString(rates[i].low, _Digits) + "," +
+                      "\\"close\\":" + DoubleToString(rates[i].close, _Digits) + "," +
+                      "\\"epoch\\":" + IntegerToString(rates[i].time) + "," +
+                      "\\"volume\\":" + IntegerToString(rates[i].tick_volume) + "}";
+      candles_json += candle;
+      if(i > 0) candles_json += ",";
+   }
+   candles_json += "]";
+   
+   // 3. Build Full POST Payload with real broker data
+   string json_body = "{\\"type\\":\\"candles\\"," +
+                      "\\"balance\\":" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "," +
+                      "\\"equity\\":" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + "," +
+                      "\\"loginid\\":\\"" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\\"," +
+                      "\\"server\\":\\"" + AccountInfoString(ACCOUNT_SERVER) + "\\"," +
+                      "\\"candles\\":" + candles_json + "}";
+                      
+   char post[], result[];
+   string result_headers;
+   string headers = "Content-Type: application/json\\r\\n";
+   
+   StringToCharArray(json_body, post, 0, WHOLE_ARRAY, CP_UTF8);
+   
+   // 4. Send WebRequest to the AI Server Webhook
+   int res = WebRequest("POST", InpWebhookUrl, headers, 15000, post, result, result_headers);
    
    if(res == 200) {
-      string json = CharArrayToString(result);
+      string response_text = CharArrayToString(result);
+      
+      // Update variables from server response config
+      int sl_pips = JsonGetInt(response_text, "slPips", InpDefaultSLPips);
+      int tp_pips = JsonGetInt(response_text, "tpPips", InpDefaultTPPips);
+      double lot_size = JsonGetDouble(response_text, "lotSize", InpLotSize);
+      
       // Simple JSON parser (Check for "BUY" or "SELL" signals)
-      if(StringFind(json, "\\"action\\":\\"BUY\\"") >= 0 || StringFind(json, "\\"action\\":\\"CALL\\"") >= 0) {
+      string action = "HOLD";
+      if(StringFind(response_text, "\\"action\\":\\"BUY\\"") >= 0 || StringFind(response_text, "\\"action\\":\\"CALL\\"") >= 0) {
+         action = "BUY";
+      }
+      else if(StringFind(response_text, "\\"action\\":\\"SELL\\"") >= 0 || StringFind(response_text, "\\"action\\":\\"PUT\\"") >= 0) {
+         action = "SELL";
+      }
+      
+      Print("Synced successfully with AI Server. Signal: ", action, " | Balance: ", AccountInfoDouble(ACCOUNT_BALANCE));
+      
+      if(action == "BUY") {
          if(TimeCurrent() - last_trade_time > 60) {
-            ExecuteTrade(ORDER_TYPE_BUY);
+            ExecuteTrade(ORDER_TYPE_BUY, sl_pips, tp_pips, lot_size);
          }
       }
-      else if(StringFind(json, "\\"action\\":\\"SELL\\"") >= 0 || StringFind(json, "\\"action\\":\\"PUT\\"") >= 0) {
+      else if(action == "SELL") {
          if(TimeCurrent() - last_trade_time > 60) {
-            ExecuteTrade(ORDER_TYPE_SELL);
+            ExecuteTrade(ORDER_TYPE_SELL, sl_pips, tp_pips, lot_size);
          }
       }
    } else {
-      Print("Error fetching AI signals. Code: ", res);
+      Print("Error syncing with AI Server. Code: ", res);
    }
 }
 
 //+------------------------------------------------------------------+
-//| Execute Buy/Sell Trade                                           |
+//| Check if there are any open positions for current magic number   |
 //+------------------------------------------------------------------+
-void ExecuteTrade(ENUM_ORDER_TYPE order_type) {
+bool HasOpenPositions() {
+   for(int i = PositionsTotal() - 1; i >= 0; i--) {
+      if(PositionGetSymbol(i) == _Symbol) {
+         if(PositionGetInteger(POSITION_MAGIC) == InpMagic) {
+            return true;
+         }
+      }
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Execute Buy/Sell Trade with custom TP and SL                     |
+//+------------------------------------------------------------------+
+void ExecuteTrade(ENUM_ORDER_TYPE order_type, int sl_pips, int tp_pips, double lot_size) {
+   if(HasOpenPositions()) {
+      Print("Skipping order. Position already open for Magic: ", InpMagic);
+      return;
+   }
+   
    MqlTradeRequest request={};
    MqlTradeResult  trade_result={};
    
    request.action       = TRADE_ACTION_DEAL;
    request.symbol       = _Symbol;
-   request.volume       = InpLotSize;
+   request.volume       = lot_size > 0 ? lot_size : InpLotSize;
    request.type         = order_type;
-   request.price        = (order_type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   
+   double price = (order_type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   request.price        = price;
+   
+   // Calculate SL and TP prices
+   double sl_price = 0;
+   double tp_price = 0;
+   
+   if(order_type == ORDER_TYPE_BUY) {
+      if(sl_pips > 0) sl_price = price - (sl_pips * _Point);
+      if(tp_pips > 0) tp_price = price + (tp_pips * _Point);
+   } else if(order_type == ORDER_TYPE_SELL) {
+      if(sl_pips > 0) sl_price = price + (sl_pips * _Point);
+      if(tp_pips > 0) tp_price = price - (tp_pips * _Point);
+   }
+   
+   request.sl           = sl_price;
+   request.tp           = tp_price;
    request.deviation    = InpSlippage;
    request.magic        = InpMagic;
-   request.comment      = "AI Quantitative Trader Signal";
+   request.comment      = "XAUUSD AI Quant Trader Order";
    
    if(OrderSend(request, trade_result)) {
-      Print("AI Trade executed successfully. Ticket: ", trade_result.order);
+      Print("AI Trade executed successfully. Ticket: ", trade_result.order, " | Price: ", price, " | SL: ", sl_price, " | TP: ", tp_price);
       last_trade_time = TimeCurrent();
    } else {
       Print("Trade execution failed. Error: ", GetLastError());
@@ -406,21 +538,21 @@ void ExecuteTrade(ENUM_ORDER_TYPE order_type) {
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] text-indigo-400 font-sans font-bold flex items-center gap-1">
                     <Code className="w-3.5 h-3.5" />
-                    <span>Inbound API Endpoint สําหรับ EA ของคุณ</span>
+                    <span>Inbound API Webhook สําหรับ EA ของคุณ (แนะนำ ⭐)</span>
                   </span>
                   <button
-                    onClick={() => copyToClipboard(localSignalUrl, 1)}
+                    onClick={() => copyToClipboard(localWebhookUrl, 1)}
                     className="p-1 hover:bg-slate-900 rounded text-slate-400 hover:text-white transition-colors"
-                    title="คัดลอกลิงก์ API"
+                    title="คัดลอกลิงก์ API Webhook"
                   >
                     {copiedIndex === 1 ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
                 </div>
                 <div className="bg-slate-900 p-2 rounded text-[10px] font-mono text-amber-400 overflow-x-auto whitespace-nowrap scrollbar-thin">
-                  {localSignalUrl}
+                  {localWebhookUrl}
                 </div>
                 <p className="text-[10px] text-slate-400 leading-normal font-sans">
-                  ตั้งค่าใน MT5 EA ของคุณให้ส่ง HTTP GET มายัง URL นี้เพื่อรับสัญญาณอัพเดททันทีจากคลาวด์บอท AI
+                  นำ URL นี้ไปใส่ในตัวแปร <code className="text-amber-400 font-mono">InpWebhookUrl</code> ของ MQL5 EA เพื่อให้ระบบส่งยอดเงินจริงและข้อมูลแท่งเทียนโบรกเกอร์มาวิเคราะห์บนเว็บโดยตรง
                 </p>
               </div>
 

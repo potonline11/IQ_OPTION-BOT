@@ -1537,7 +1537,40 @@ app.get("/api/mt5/signals", (req, res) => {
 
 // POST Webhook endpoint for MT5 to send real-time candlestick/tick data or order execution updates
 app.post("/api/mt5/signal-webhook", (req, res) => {
-  const { type, candles, tradeId, status, profit, exitPrice } = req.body;
+  const { type, candles, tradeId, status, profit, exitPrice, balance, equity, loginid, server } = req.body;
+  
+  let stateChanged = false;
+  
+  if (balance !== undefined) {
+    const parsedBalance = parseFloat(balance);
+    if (!isNaN(parsedBalance)) {
+      cloudBot.balance = parsedBalance;
+      stateChanged = true;
+    }
+  }
+  
+  if (loginid !== undefined && loginid !== "") {
+    cloudBot.brokerLoginId = String(loginid);
+    cloudBot.brokerName = "บัญชี MT5: " + loginid;
+    stateChanged = true;
+  }
+  
+  if (server !== undefined && server !== "") {
+    cloudBot.mt5Server = String(server);
+    stateChanged = true;
+  }
+  
+  if (stateChanged) {
+    saveCloudBotState();
+    cloudBot.broadcast({
+      name: "cloud-bot-sync",
+      status: cloudBot.status,
+      balance: cloudBot.balance,
+      brokerLoginId: cloudBot.brokerLoginId,
+      brokerName: cloudBot.brokerName,
+      accountType: cloudBot.accountType
+    });
+  }
   
   // 1. Candlestick feed from MT5
   if (type === "candles" && Array.isArray(candles)) {
@@ -1561,8 +1594,20 @@ app.post("/api/mt5/signal-webhook", (req, res) => {
     });
 
     triggerServerAIAnalysis();
-    addSystemLog("received", `📈 [MT5 Feed] ได้รับข้อมูลแท่งเทียนใหม่ ${parsed.length} แท่ง ประมวลผล AI สำเร็จ`);
-    return res.json({ success: true, message: "รับข้อมูลแท่งเทียนสำเร็จ" });
+    addSystemLog("received", `📈 [MT5 Feed] ได้รับข้อมูลแท่งเทียนโบรกเกอร์จริง ${parsed.length} แท่ง | ยอดเงินพอร์ตจริง: ฿${cloudBot.balance.toLocaleString()} (หรือ USD) | เริ่มวิเคราะห์ AI สำเร็จ`);
+    
+    return res.json({
+      success: true,
+      message: "รับข้อมูลแท่งเทียนสำเร็จ",
+      balance: cloudBot.balance,
+      signal: cloudBot.activeSignal || { action: "HOLD", confidence: 0, reason: "ไม่มีสัญญาณวิเคราะห์" },
+      config: {
+        lotSize: cloudBot.lotSize,
+        slPips: cloudBot.slPips,
+        tpPips: cloudBot.tpPips,
+        symbol: cloudBot.activeAssetName
+      }
+    });
   }
 
   // 2. Order result update from MT5
@@ -1599,11 +1644,28 @@ app.post("/api/mt5/signal-webhook", (req, res) => {
     if (matched) {
       saveCloudBotState();
       addSystemLog("success", `✅ [MT5 Execution] ออเดอร์ ${tradeId} ปิดสัญญาสำเร็จ! ผลลัพธ์: ${status} | กำไร: $${profit} USD`);
-      return res.json({ success: true, message: "อัปเดตผลลัพธ์ออเดอร์สำเร็จ" });
+      return res.json({
+        success: true,
+        message: "อัปเดตผลลัพธ์ออเดอร์สำเร็จ",
+        balance: cloudBot.balance,
+        signal: cloudBot.activeSignal || { action: "HOLD", confidence: 0, reason: "ไม่มีสัญญาณวิเคราะห์" }
+      });
     }
   }
 
-  res.status(400).json({ success: false, error: "ประเภทคำขอไม่ถูกต้อง" });
+  // Fallback response for other sync signals
+  res.json({
+    success: true,
+    message: "ซิงค์ข้อมูลสำเร็จ",
+    balance: cloudBot.balance,
+    signal: cloudBot.activeSignal || { action: "HOLD", confidence: 0, reason: "ไม่มีสัญญาณวิเคราะห์" },
+    config: {
+      lotSize: cloudBot.lotSize,
+      slPips: cloudBot.slPips,
+      tpPips: cloudBot.tpPips,
+      symbol: cloudBot.activeAssetName
+    }
+  });
 });
 
 // Configure Vite or serve static assets

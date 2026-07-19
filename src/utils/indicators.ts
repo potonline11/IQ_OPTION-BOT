@@ -27,10 +27,14 @@ export function calculateEMA(data: number[], period: number): number[] {
 /**
  * Takes an array of candles with missing EMA values and calculates them dynamically based on close prices.
  */
-export function enrichCandlesWithEMA(candles: Omit<Candle, "ema5" | "ema13">[]): Candle[] {
+export function enrichCandlesWithEMA(
+  candles: Omit<Candle, "ema5" | "ema13">[],
+  fastPeriod: number = 5,
+  slowPeriod: number = 13
+): Candle[] {
   const closes = candles.map(c => c.close);
-  const ema5Values = calculateEMA(closes, 5);
-  const ema13Values = calculateEMA(closes, 13);
+  const ema5Values = calculateEMA(closes, fastPeriod);
+  const ema13Values = calculateEMA(closes, slowPeriod);
   
   return candles.map((candle, index) => ({
     ...candle,

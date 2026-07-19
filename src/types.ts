@@ -10,7 +10,7 @@ export interface Candle {
   epoch?: number;
 }
 
-export type ActionType = "CALL" | "PUT" | "HOLD";
+export type ActionType = "CALL" | "PUT" | "BUY" | "SELL" | "HOLD";
 
 export interface AISignal {
   action: ActionType;
@@ -24,8 +24,8 @@ export interface Trade {
   investAmount: number;
   entryPrice: number;
   exitPrice?: number;
-  action: "CALL" | "PUT";
-  aiAction: ActionType;
+  action: "CALL" | "PUT" | "BUY" | "SELL";
+  aiAction: ActionType | "BUY" | "SELL" | "HOLD";
   aiConfidence: number;
   status: "PENDING" | "WIN" | "LOSS";
   payout?: number;
@@ -33,6 +33,11 @@ export interface Trade {
   resolvedAt?: string;
   contract_id?: number | string;
   expired_epoch?: number;
+  lotSize?: number;
+  slPrice?: number;
+  tpPrice?: number;
+  slPips?: number;
+  tpPips?: number;
 }
 
 export interface MarketScenario {

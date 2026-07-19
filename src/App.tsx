@@ -45,15 +45,14 @@ export default function App() {
 
   // 3. Live Broker Connection State
   const [connectionMode, setConnectionMode] = useState<"simulation" | "live">("simulation");
-  const [iqEmail, setIqEmail] = useState<string>("");
-  const [iqPassword, setIqPassword] = useState<string>("");
-  const [iqAccountType, setIqAccountType] = useState<"demo" | "real">("demo");
-  const [connectMethod, setConnectMethod] = useState<"credentials" | "ssid">("credentials");
-  const [manualSSID, setManualSSID] = useState<string>("");
+  const [mt5Server, setMt5Server] = useState<string>("");
+  const [mt5Login, setMt5Login] = useState<string>("");
+  const [mt5Password, setMt5Password] = useState<string>("");
+  const [mt5WebhookUrl, setMt5WebhookUrl] = useState<string>("");
+  const [mt5AccountType, setMt5AccountType] = useState<"demo" | "real">("demo");
   const [connectionStatus, setConnectionStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
   const [brokerAccountInfo, setBrokerAccountInfo] = useState<{
-    email: string;
-    fullname: string;
+    server: string;
     loginid: string;
     is_virtual: boolean;
     balance?: number;
@@ -62,9 +61,17 @@ export default function App() {
   const [tradeErrorMsg, setTradeErrorMsg] = useState<string | null>(null);
   const [activeAssetId, setActiveAssetId] = useState<number>(74);
   const [activeAssetName, setActiveAssetName] = useState<string>("XAUUSD");
-  const [twoFactorToken, setTwoFactorToken] = useState<string | null>(null);
-  const [twoFactorType, setTwoFactorType] = useState<string | null>(null);
-  const [twoFactorEmail, setTwoFactorEmail] = useState<string | null>(null);
+  const [lotSize, setLotSize] = useState<number>(0.10);
+  const [slPips, setSlPips] = useState<number>(200);
+  const [tpPips, setTpPips] = useState<number>(300);
+
+  // V98.3 EMA & Day Trade Limit states
+  const [dayTradeLimitEnabled, setDayTradeLimitEnabled] = useState<boolean>(false);
+  const [maxDailyTrades, setMaxDailyTrades] = useState<number>(10);
+  const [dailyTakeProfitLimit, setDailyTakeProfitLimit] = useState<number>(100);
+  const [dailyStopLossLimit, setDailyStopLossLimit] = useState<number>(50);
+  const [fastEmaPeriod, setFastEmaPeriod] = useState<number>(5);
+  const [slowEmaPeriod, setSlowEmaPeriod] = useState<number>(13);
 
   // Maintain reference to current candles, trades, balance, activeSignal, etc.
   const candlesRef = useRef<Candle[]>(candles);
@@ -78,10 +85,12 @@ export default function App() {
     activeAssetIdRef.current = activeAssetId;
   }, [activeAssetId]);
   
-  // IQ Option Credentials and AutoTrade Refs for websocket closures
-  const iqEmailRef = useRef<string>("");
-  const iqPasswordRef = useRef<string>("");
-  const iqAccountTypeRef = useRef<"demo" | "real">("demo");
+  // MT5 Credentials and AutoTrade Refs for websocket closures
+  const mt5ServerRef = useRef<string>("");
+  const mt5LoginRef = useRef<string>("");
+  const mt5PasswordRef = useRef<string>("");
+  const mt5WebhookUrlRef = useRef<string>("");
+  const mt5AccountTypeRef = useRef<"demo" | "real">("demo");
   const autoTradeRef = useRef<boolean>(false);
   const connectionModeRef = useRef<"simulation" | "live">("simulation");
 
@@ -91,8 +100,6 @@ export default function App() {
 
   // WebSocket and Pending Request References
   const wsRef = useRef<WebSocket | null>(null);
-  const pendingProposalRequestsRef = useRef<Map<string, { action: "CALL" | "PUT"; amount: number }>>(new Map());
-  const activeContractsRef = useRef<Map<string, { tradeId: string; amount: number; action: "CALL" | "PUT" }>>(new Map());
 
   useEffect(() => {
     candlesRef.current = candles;
@@ -115,16 +122,24 @@ export default function App() {
   }, [activeSignal]);
 
   useEffect(() => {
-    iqEmailRef.current = iqEmail;
-  }, [iqEmail]);
+    mt5ServerRef.current = mt5Server;
+  }, [mt5Server]);
 
   useEffect(() => {
-    iqPasswordRef.current = iqPassword;
-  }, [iqPassword]);
+    mt5LoginRef.current = mt5Login;
+  }, [mt5Login]);
 
   useEffect(() => {
-    iqAccountTypeRef.current = iqAccountType;
-  }, [iqAccountType]);
+    mt5PasswordRef.current = mt5Password;
+  }, [mt5Password]);
+
+  useEffect(() => {
+    mt5WebhookUrlRef.current = mt5WebhookUrl;
+  }, [mt5WebhookUrl]);
+
+  useEffect(() => {
+    mt5AccountTypeRef.current = mt5AccountType;
+  }, [mt5AccountType]);
 
   useEffect(() => {
     autoTradeRef.current = autoTrade;
@@ -132,20 +147,25 @@ export default function App() {
 
   // Load saved broker credentials and check if background cloud bot is already active on mount
   useEffect(() => {
-    const savedEmail = localStorage.getItem("iq_email");
-    const savedPassword = localStorage.getItem("iq_password");
-    const savedAccountType = localStorage.getItem("iq_account_type");
-    const savedConnectMethod = localStorage.getItem("iq_connect_method");
-    const savedManualSSID = localStorage.getItem("iq_manual_ssid");
-    if (savedEmail) setIqEmail(savedEmail);
-    if (savedPassword) setIqPassword(savedPassword);
+    const savedServer = localStorage.getItem("mt5_server");
+    const savedLogin = localStorage.getItem("mt5_login");
+    const savedPassword = localStorage.getItem("mt5_password");
+    const savedWebhookUrl = localStorage.getItem("mt5_webhook_url");
+    const savedAccountType = localStorage.getItem("mt5_account_type");
+    const savedLots = localStorage.getItem("mt5_lots");
+    const savedSl = localStorage.getItem("mt5_sl");
+    const savedTp = localStorage.getItem("mt5_tp");
+
+    if (savedServer) setMt5Server(savedServer);
+    if (savedLogin) setMt5Login(savedLogin);
+    if (savedPassword) setMt5Password(savedPassword);
+    if (savedWebhookUrl) setMt5WebhookUrl(savedWebhookUrl);
     if (savedAccountType === "real" || savedAccountType === "demo") {
-      setIqAccountType(savedAccountType);
+      setMt5AccountType(savedAccountType);
     }
-    if (savedConnectMethod === "credentials" || savedConnectMethod === "ssid") {
-      setConnectMethod(savedConnectMethod);
-    }
-    if (savedManualSSID) setManualSSID(savedManualSSID);
+    if (savedLots) setLotSize(parseFloat(savedLots));
+    if (savedSl) setSlPips(parseInt(savedSl));
+    if (savedTp) setTpPips(parseInt(savedTp));
 
     const checkCloudBotStatus = async () => {
       try {
@@ -153,6 +173,14 @@ export default function App() {
         const json = await res.json();
         if (json.success && json.data) {
           const bot = json.data;
+          
+          if (bot.dayTradeLimitEnabled !== undefined) setDayTradeLimitEnabled(bot.dayTradeLimitEnabled);
+          if (bot.maxDailyTrades !== undefined) setMaxDailyTrades(bot.maxDailyTrades);
+          if (bot.dailyTakeProfitLimit !== undefined) setDailyTakeProfitLimit(bot.dailyTakeProfitLimit);
+          if (bot.dailyStopLossLimit !== undefined) setDailyStopLossLimit(bot.dailyStopLossLimit);
+          if (bot.fastEmaPeriod !== undefined) setFastEmaPeriod(bot.fastEmaPeriod);
+          if (bot.slowEmaPeriod !== undefined) setSlowEmaPeriod(bot.slowEmaPeriod);
+
           if (bot.status === "connected") {
             setConnectionMode("live");
             setConnectionStatus("connected");
@@ -168,20 +196,19 @@ export default function App() {
               setActiveSignal(bot.activeSignal);
             }
             if (bot.accountType) {
-              setIqAccountType(bot.accountType);
-              localStorage.setItem("iq_account_type", bot.accountType);
+              setMt5AccountType(bot.accountType);
+              localStorage.setItem("mt5_account_type", bot.accountType);
             }
-            if (bot.brokerEmail) {
+            if (bot.brokerLoginId) {
               setBrokerAccountInfo({
-                email: bot.brokerEmail,
-                fullname: bot.brokerName || "ผู้ใช้นักลงทุน",
-                loginid: bot.brokerLoginId || "",
+                server: bot.brokerServer || "Local MT5",
+                loginid: bot.brokerLoginId,
                 is_virtual: bot.accountType === "demo",
                 balance: bot.balance
               });
             }
             // Auto-reconnect browser WS proxy to stream real-time updates
-            connectWebSocket(bot.ssid, bot.accountType);
+            connectWebSocket(bot.brokerLoginId || "MT5_User", bot.accountType);
           }
         }
       } catch (err) {
@@ -202,7 +229,11 @@ export default function App() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candles: recentCandles }),
+        body: JSON.stringify({ 
+          candles: recentCandles,
+          fastEma: fastEmaPeriod,
+          slowEma: slowEmaPeriod
+        }),
       });
       
       const result = await response.json();
@@ -327,7 +358,7 @@ export default function App() {
         const p = data.msg;
         if (p) {
           const balances = p.balances || [];
-          const targetType = iqAccountTypeRef.current === "demo" ? 4 : 1;
+          const targetType = mt5AccountTypeRef.current === "demo" ? 4 : 1;
           let selectedBalance = balances.find((b: any) => b.type === targetType);
           if (!selectedBalance && balances.length > 0) {
             selectedBalance = balances[0];
@@ -337,10 +368,9 @@ export default function App() {
           const balanceAmount = selectedBalance ? selectedBalance.amount : p.balance;
           
           setBrokerAccountInfo({
-            email: p.email,
-            fullname: p.first_name || p.name || "ผู้ใช้นักลงทุน",
+            server: p.server || "MT5 Server",
             loginid: balanceId?.toString() || p.id?.toString() || "12345",
-            is_virtual: iqAccountTypeRef.current === "demo",
+            is_virtual: mt5AccountTypeRef.current === "demo",
             balance: balanceAmount
           });
           setBalance(balanceAmount);
@@ -398,7 +428,7 @@ export default function App() {
         if (balMsg) {
           const balancesList = Array.isArray(balMsg) ? balMsg : (balMsg.balances || []);
           if (balancesList.length > 0) {
-            const targetType = iqAccountTypeRef.current === "demo" ? 4 : 1;
+            const targetType = mt5AccountTypeRef.current === "demo" ? 4 : 1;
             const activeBal = balancesList.find((b: any) => b.type === targetType);
             if (activeBal) {
               setBalance(activeBal.amount);
@@ -426,7 +456,7 @@ export default function App() {
           }));
           
           parsedCandles.sort((a, b) => a.epoch - b.epoch);
-          const enriched = enrichCandlesWithEMA(parsedCandles);
+          const enriched = enrichCandlesWithEMA(parsedCandles, fastEmaPeriod, slowEmaPeriod);
           setCandles(enriched);
           
           // Trigger AI analysis on the initial candles
@@ -467,7 +497,7 @@ export default function App() {
             return prev;
           }
           
-          const enriched = enrichCandlesWithEMA(copy);
+          const enriched = enrichCandlesWithEMA(copy, fastEmaPeriod, slowEmaPeriod);
           
           // Trigger AI analysis as soon as a candle completes/rolls-over!
           if (didChangeMin) {
@@ -527,7 +557,7 @@ export default function App() {
     }
   };
 
-  const connectWebSocket = (ssid: string, overrideAccountType?: "demo" | "real") => {
+  const connectWebSocket = (loginid: string, overrideAccountType?: "demo" | "real") => {
     // Close pre-existing socket
     if (wsRef.current) {
       wsRef.current.close();
@@ -538,17 +568,17 @@ export default function App() {
     const host = window.location.host;
     const proxyUrl = `${protocol}//${host}/ws-proxy`;
     
-    console.log(`[IQ Option] Connecting to secure cloud WS proxy: ${proxyUrl}`);
+    console.log(`[MT5 Bridge] Connecting to secure cloud WS proxy: ${proxyUrl}`);
     const ws = new WebSocket(proxyUrl);
     wsRef.current = ws;
     
     ws.onopen = () => {
-      const activeType = overrideAccountType || iqAccountType;
-      console.log(`[IQ Option] WS proxy tunnel opened. Authenticating with account type: ${activeType}`);
-      // Authenticate immediately with our SSID token and target accountType
+      const activeType = overrideAccountType || mt5AccountType;
+      console.log(`[MT5 Bridge] WS proxy tunnel opened. Authenticating with account type: ${activeType}`);
+      // Authenticate immediately with our MT5 configuration
       ws.send(JSON.stringify({
-        name: "ssid",
-        msg: ssid,
+        name: "mt5-auth",
+        loginid: loginid,
         accountType: activeType
       }));
     };
@@ -556,7 +586,7 @@ export default function App() {
     ws.onmessage = onWebSocketMessage;
     
     ws.onerror = (err) => {
-      console.error("IQ Option WS error:", err);
+      console.error("MT5 WS error:", err);
       setConnectionStatus("error");
       setBrokerErrorMsg(
         "ไม่สามารถเชื่อมต่อโบรกเกอร์ผ่านเซิร์ฟเวอร์สำรองได้ กรุณาตรวจสอบอินเทอร์เน็ตของท่าน หรือลองเชื่อมใหม่อีกครั้ง"
@@ -571,138 +601,57 @@ export default function App() {
 
   const handleConnectBroker = async () => {
     setBrokerErrorMsg(null);
-    setTwoFactorToken(null);
-    setTwoFactorType(null);
-    setTwoFactorEmail(null);
 
-    if (connectMethod === "ssid") {
-      if (!manualSSID.trim()) {
-        setBrokerErrorMsg("กรุณากรอกรหัสเซสชั่น SSID ที่คัดลอกมา");
-        return;
-      }
-      
-      setConnectionStatus("connecting");
-      try {
-        // Save connection configuration to localStorage
-        localStorage.setItem("iq_connect_method", "ssid");
-        localStorage.setItem("iq_manual_ssid", manualSSID.trim());
-        localStorage.setItem("iq_account_type", iqAccountType);
-
-        connectWebSocket(manualSSID.trim());
-      } catch (err: any) {
-        console.error("Broker manual SSID connection error:", err);
-        setConnectionStatus("error");
-        setBrokerErrorMsg(err.message || "การเชื่อมต่อด้วย SSID ล้มเหลว");
-      }
-      return;
-    }
-
-    if (!iqEmail.trim() || !iqPassword.trim()) {
-      setBrokerErrorMsg("กรุณากรอกอีเมลและรหัสผ่านโบรกเกอร์");
+    if (!mt5Server.trim() || !mt5Login.trim()) {
+      setBrokerErrorMsg("กรุณากรอกชื่อเซิร์ฟเวอร์และเลขบัญชี MT5");
       return;
     }
     
     setConnectionStatus("connecting");
     
     try {
-      // Save connection configuration to localStorage
-      localStorage.setItem("iq_connect_method", "credentials");
+      localStorage.setItem("mt5_server", mt5Server.trim());
+      localStorage.setItem("mt5_login", mt5Login.trim());
+      localStorage.setItem("mt5_password", mt5Password.trim());
+      localStorage.setItem("mt5_webhook_url", mt5WebhookUrl.trim());
+      localStorage.setItem("mt5_account_type", mt5AccountType);
 
-      // 1. Retrieve secure SSID using local backend login proxy (avoids CORS)
-      const res = await fetch("/api/iqoption/login", {
+      const res = await fetch("/api/mt5/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          identifier: iqEmail.trim(),
-          password: iqPassword.trim()
+          server: mt5Server.trim(),
+          loginid: mt5Login.trim(),
+          password: mt5Password.trim(),
+          webhookUrl: mt5WebhookUrl.trim(),
+          accountType: mt5AccountType
         })
       });
       
       const result = await res.json();
-      if (!res.ok || !result.success || !result.data) {
-        throw new Error(result.error || "ไม่สามารถยืนยันตัวตนกับทางโบรกเกอร์ได้");
-      }
-
-      // Check if 2FA is required
-      if (result.twoFactorRequired || result.data.code === "two_factor") {
-        setTwoFactorToken(result.data.token);
-        setTwoFactorType(result.data.type || "email");
-        setTwoFactorEmail(result.data.email || "");
-        setConnectionStatus("disconnected");
-        return;
+      if (!res.ok || !result.success) {
+        throw new Error(result.error || "ไม่สามารถเชื่อมต่อสะพาน MT5 ได้");
       }
       
-      const ssid = result.data.ssid || result.data.result?.ssid;
-      if (!ssid) {
-        throw new Error("ไม่ได้รับรหัสเซสชั่น SSID กรุณาตรวจสอบรหัสผ่านอีกครั้ง");
-      }
+      setBrokerAccountInfo({
+        server: mt5Server.trim(),
+        loginid: mt5Login.trim(),
+        is_virtual: mt5AccountType === "demo",
+        balance: result.data?.balance || 10000.00
+      });
+      setBalance(result.data?.balance || 10000.00);
+      setConnectionStatus("connected");
       
-      // Save credentials to localStorage
-      localStorage.setItem("iq_email", iqEmail.trim());
-      localStorage.setItem("iq_password", iqPassword.trim());
-      localStorage.setItem("iq_account_type", iqAccountType);
-
-      connectWebSocket(ssid);
-      
+      connectWebSocket(mt5Login.trim());
     } catch (err: any) {
       console.error("Broker connection error:", err);
       setConnectionStatus("error");
-      setBrokerErrorMsg(err.message || "การเชื่อมต่อเซิร์ฟเวอร์เข้าสู่ระบบของโบรกเกอร์ล้มเหลว");
-    }
-  };
-
-  const handleVerify2FA = async (code: string) => {
-    if (!code.trim()) {
-      setBrokerErrorMsg("กรุณากรอกรหัสรักษาความปลอดภัย");
-      return;
-    }
-
-    setConnectionStatus("connecting");
-    setBrokerErrorMsg(null);
-
-    try {
-      const res = await fetch("/api/iqoption/login/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: twoFactorToken,
-          code: code.trim()
-        })
-      });
-
-      const result = await res.json();
-      if (!res.ok || !result.success || !result.data) {
-        throw new Error(result.error || "รหัสความปลอดภัยไม่ถูกต้องหรือหมดอายุ");
-      }
-
-      const ssid = result.data.ssid || result.data.result?.ssid;
-      if (!ssid) {
-        throw new Error("ไม่ได้รับรหัสเซสชั่น SSID กรุณาลองขอรหัสความปลอดภัยใหม่อีกครั้ง");
-      }
-
-      // Clear 2FA State on success
-      setTwoFactorToken(null);
-      setTwoFactorType(null);
-      setTwoFactorEmail(null);
-
-      // Save credentials to localStorage
-      localStorage.setItem("iq_email", iqEmail.trim());
-      localStorage.setItem("iq_password", iqPassword.trim());
-      localStorage.setItem("iq_account_type", iqAccountType);
-
-      connectWebSocket(ssid);
-    } catch (err: any) {
-      console.error("Broker 2FA Verification Error:", err);
-      setConnectionStatus("error");
-      setBrokerErrorMsg(err.message || "การตรวจสอบสิทธิ์ความปลอดภัยล้มเหลว");
+      setBrokerErrorMsg(err.message || "การเชื่อมต่อสะพานสัญญาณ MT5 ล้มเหลว");
     }
   };
 
   const handleDisconnectBroker = async () => {
     if (wsRef.current) {
-      if (wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ name: "cloud-bot-stop" }));
-      }
       wsRef.current.close();
       wsRef.current = null;
     }
@@ -799,63 +748,98 @@ export default function App() {
     runAIAnalysis(scenario.candles);
   };
 
-  // 6. Place Simulated/Real Position
-  const handlePlaceTrade = (action: "CALL" | "PUT", amount: number) => {
+  // 6. Place Simulated/Real MT5 Position
+  const handlePlaceTrade = async (rawAction: "CALL" | "PUT" | "BUY" | "SELL" | string, amount: number) => {
+    const action: "BUY" | "SELL" = (rawAction === "CALL" || rawAction === "BUY") ? "BUY" : "SELL";
+    
     if (connectionMode === "live") {
       if (connectionStatus !== "connected") {
-        alert("กรุณาเชื่อมต่อบัญชีโบรกเกอร์สำเร็จก่อนส่งออเดอร์จริง");
+        alert("กรุณาเชื่อมต่อพอร์ต MT5 สำเร็จก่อนส่งออเดอร์จริง");
         return;
       }
       
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        alert("การเชื่อมต่อกับโบรกเกอร์ขัดข้อง กรุณาเชื่อมต่อใหม่อีกครั้ง");
-        return;
-      }
-
-      const currentEpoch = Math.floor(Date.now() / 1000);
-      const secondsLeftInMinute = 60 - (currentEpoch % 60);
-      // Calculate next 1m turbo option expiration boundary (with 35 seconds safety buffer)
-      const expirationEpoch = secondsLeftInMinute < 35 
-        ? currentEpoch + secondsLeftInMinute + 60 
-        : currentEpoch + secondsLeftInMinute;
-
-      wsRef.current.send(JSON.stringify({
-        name: "sendMessage",
-        msg: {
-          name: "binary-options.open-option",
-          version: "1.0",
-          body: {
-            user_balance_id: parseInt(brokerAccountInfo?.loginid || "0"),
-            active_id: activeAssetIdRef.current, // Dynamic active asset ID
-            option_type_id: 3, // Turbo Option
-            direction: action.toLowerCase(), // "call" or "put"
-            price: amount,
-            expired: expirationEpoch,
-            refund_value: 0
-          }
+      try {
+        const res = await fetch("/api/mt5/trade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action,
+            lotSize: lotSize,
+            slPips: slPips,
+            tpPips: tpPips,
+            symbol: activeAssetName
+          })
+        });
+        const result = await res.json();
+        if (!res.ok || !result.success) {
+          throw new Error(result.error || "ไม่สามารถส่งคำสั่งเทรดเข้า MT5 ได้");
         }
-      }));
+      } catch (err: any) {
+        setTradeErrorMsg(err.message || "การเชื่อมต่อขัดข้อง");
+      }
       return;
     }
 
-    if (balance < amount) return;
-
-    // Deduct entry amount from demo balance immediately
-    const entryPrice = candles[candles.length - 1].close;
-    setBalance(prev => prev - amount);
+    // SIMULATION MODE
+    const entryPrice = candles[candles.length - 1]?.close || 2350.0;
+    
+    // Sl and Tp prices (Assume Gold where 100 pips = $1.00, so 1 pip = 0.01)
+    const slPrice = slPips > 0 
+      ? (action === "BUY" ? entryPrice - (slPips * 0.01) : entryPrice + (slPips * 0.01))
+      : undefined;
+    const tpPrice = tpPips > 0
+      ? (action === "BUY" ? entryPrice + (tpPips * 0.01) : entryPrice - (tpPips * 0.01))
+      : undefined;
 
     const newTrade: Trade = {
       id: "trade_" + Math.random().toString(36).substring(2, 9),
       timestamp: new Date().toISOString(),
-      investAmount: amount,
+      investAmount: amount, // represent general display invest
       entryPrice: entryPrice,
       action: action,
       aiAction: activeSignal ? activeSignal.action : "HOLD",
       aiConfidence: activeSignal ? activeSignal.confidence : 0,
-      status: "PENDING"
+      status: "PENDING",
+      lotSize: lotSize,
+      slPips: slPips,
+      tpPips: tpPips,
+      slPrice,
+      tpPrice
     };
 
     setTrades(prev => [newTrade, ...prev]);
+  };
+
+  const handleCloseTrade = (tradeId: string) => {
+    setTrades(prev => {
+      return prev.map(t => {
+        if (t.id === tradeId && t.status === "PENDING") {
+          const entry = t.entryPrice;
+          const exitPrice = candles[candles.length - 1]?.close || 2350.0;
+          const action = t.action;
+          const lots = t.lotSize || 0.1;
+          
+          let pipDiff = 0;
+          if (action === "BUY" || action === "CALL") {
+            pipDiff = exitPrice - entry;
+          } else {
+            pipDiff = entry - exitPrice;
+          }
+          
+          const profit = pipDiff * 100 * lots;
+          setBalance(prevBal => prevBal + profit);
+          
+          return {
+            ...t,
+            status: profit >= 0 ? "WIN" : "LOSS",
+            exitPrice,
+            profit,
+            resolvedAt: new Date().toISOString()
+          };
+        }
+        return t;
+      });
+    });
   };
 
   // 6. Manual Candlestick Modifier Updates
@@ -868,7 +852,7 @@ export default function App() {
       copy[lastIndex] = updatedCandle as Candle;
       
       // Re-calculate EMAs dynamically so indicator lines update on chart!
-      return enrichCandlesWithEMA(copy);
+      return enrichCandlesWithEMA(copy, fastEmaPeriod, slowEmaPeriod);
     });
   };
 
@@ -901,34 +885,47 @@ export default function App() {
             const updatedCandlesRaw = [...currentCandles, nextCandleRaw];
             
             // Recalculate indicators for the whole series (retains perfect EMA5 and EMA13 curves!)
-            const nextCandles = enrichCandlesWithEMA(updatedCandlesRaw).slice(-15); // keep max 15 on screen for density
+            const nextCandles = enrichCandlesWithEMA(updatedCandlesRaw, fastEmaPeriod, slowEmaPeriod).slice(-15); // keep max 15 on screen for density
 
             const finalClosePrice = nextCandles[nextCandles.length - 1].close;
 
-            // Resolve pending trades
+            // Resolve pending trades using SL and TP levels
             const activeTrades = tradesRef.current;
             const updatedTrades = activeTrades.map((t) => {
               if (t.status === "PENDING") {
-                let status: "WIN" | "LOSS" = "LOSS";
-                if (t.action === "CALL" && finalClosePrice > t.entryPrice) status = "WIN";
-                if (t.action === "PUT" && finalClosePrice < t.entryPrice) status = "WIN";
-
-                const payout = status === "WIN" ? Number((t.investAmount * 1.85).toFixed(2)) : 0;
-                const profit = status === "WIN" ? Number((t.investAmount * 0.85).toFixed(2)) : -t.investAmount;
-
-                // Credit the payout back to the user's balance
-                if (payout > 0) {
-                  setBalance((prev) => prev + payout);
+                const entry = t.entryPrice;
+                const slP = t.slPrice;
+                const tpP = t.tpPrice;
+                const lots = t.lotSize || 0.1;
+                const isBuy = t.action === "BUY" || t.action === "CALL";
+                
+                let hitTp = false;
+                let hitSl = false;
+                
+                if (isBuy) {
+                  if (tpP && finalClosePrice >= tpP) hitTp = true;
+                  if (slP && finalClosePrice <= slP) hitSl = true;
+                } else {
+                  if (tpP && finalClosePrice <= tpP) hitTp = true;
+                  if (slP && finalClosePrice >= slP) hitSl = true;
                 }
-
-                return {
-                  ...t,
-                  status,
-                  exitPrice: finalClosePrice,
-                  payout,
-                  profit,
-                  resolvedAt: new Date().toISOString()
-                };
+                
+                if (hitTp || hitSl) {
+                  const resolvedPrice = hitTp ? (tpP || finalClosePrice) : (slP || finalClosePrice);
+                  const pipDiff = isBuy ? (resolvedPrice - entry) : (entry - resolvedPrice);
+                  const profit = pipDiff * 100 * lots;
+                  
+                  setBalance((prev) => prev + profit);
+                  
+                  return {
+                    ...t,
+                    status: profit >= 0 ? "WIN" : "LOSS",
+                    exitPrice: resolvedPrice,
+                    payout: profit >= 0 ? profit : 0,
+                    profit,
+                    resolvedAt: new Date().toISOString()
+                  };
+                }
               }
               return t;
             });
@@ -1131,31 +1128,21 @@ export default function App() {
             <BrokerConnectionPanel
               connectionMode={connectionMode}
               setConnectionMode={setConnectionMode}
-              iqEmail={iqEmail}
-              setIqEmail={setIqEmail}
-              iqPassword={iqPassword}
-              setIqPassword={setIqPassword}
-              iqAccountType={iqAccountType}
-              setIqAccountType={setIqAccountType}
+              mt5Server={mt5Server}
+              setMt5Server={setMt5Server}
+              mt5Login={mt5Login}
+              setMt5Login={setMt5Login}
+              mt5Password={mt5Password}
+              setMt5Password={setMt5Password}
+              mt5WebhookUrl={mt5WebhookUrl}
+              setMt5WebhookUrl={setMt5WebhookUrl}
+              mt5AccountType={mt5AccountType}
+              setMt5AccountType={setMt5AccountType}
               connectionStatus={connectionStatus}
               onConnect={handleConnectBroker}
               onDisconnect={handleDisconnectBroker}
               brokerAccountInfo={brokerAccountInfo}
               errorMsg={brokerErrorMsg}
-              twoFactorToken={twoFactorToken}
-              twoFactorType={twoFactorType}
-              twoFactorEmail={twoFactorEmail}
-              onVerify2FA={handleVerify2FA}
-              onCancel2FA={() => {
-                setTwoFactorToken(null);
-                setTwoFactorType(null);
-                setTwoFactorEmail(null);
-                setConnectionStatus("disconnected");
-              }}
-              connectMethod={connectMethod}
-              setConnectMethod={setConnectMethod}
-              manualSSID={manualSSID}
-              setManualSSID={setManualSSID}
             />
 
             {/* AI Analyst Decision Panel */}
@@ -1174,19 +1161,46 @@ export default function App() {
               activeSignal={activeSignal}
               lastCandle={candles[candles.length - 1]}
               onPlaceTrade={handlePlaceTrade}
+              onCloseTrade={handleCloseTrade}
               candleTimer={candleTimer}
               autoTrade={autoTrade}
               setAutoTrade={setAutoTrade}
-              investAmount={investAmount}
-              setInvestAmount={setInvestAmount}
               connectionMode={connectionMode}
-              accountType={iqAccountType}
+              accountType={mt5AccountType}
               tradeErrorMsg={tradeErrorMsg}
               activeAssetId={activeAssetId}
               activeAssetName={activeAssetName}
+              lotSize={lotSize}
+              setLotSize={setLotSize}
+              slPips={slPips}
+              setSlPips={setSlPips}
+              tpPips={tpPips}
+              setTpPips={setTpPips}
+              
+              dayTradeLimitEnabled={dayTradeLimitEnabled}
+              setDayTradeLimitEnabled={setDayTradeLimitEnabled}
+              maxDailyTrades={maxDailyTrades}
+              setMaxDailyTrades={setMaxDailyTrades}
+              dailyTakeProfitLimit={dailyTakeProfitLimit}
+              setDailyTakeProfitLimit={setDailyTakeProfitLimit}
+              dailyStopLossLimit={dailyStopLossLimit}
+              setDailyStopLossLimit={setDailyStopLossLimit}
+              fastEmaPeriod={fastEmaPeriod}
+              setFastEmaPeriod={setFastEmaPeriod}
+              slowEmaPeriod={slowEmaPeriod}
+              setSlowEmaPeriod={setSlowEmaPeriod}
+              
               onConfigureCloudBot={async (config) => {
+                // Update local React states first for dynamic responsiveness
+                if (config.dayTradeLimitEnabled !== undefined) setDayTradeLimitEnabled(config.dayTradeLimitEnabled);
+                if (config.maxDailyTrades !== undefined) setMaxDailyTrades(config.maxDailyTrades);
+                if (config.dailyTakeProfitLimit !== undefined) setDailyTakeProfitLimit(config.dailyTakeProfitLimit);
+                if (config.dailyStopLossLimit !== undefined) setDailyStopLossLimit(config.dailyStopLossLimit);
+                if (config.fastEmaPeriod !== undefined) setFastEmaPeriod(config.fastEmaPeriod);
+                if (config.slowEmaPeriod !== undefined) setSlowEmaPeriod(config.slowEmaPeriod);
+
                 if (connectionMode === "live") {
-                  const fullConfig = { ...config, accountType: iqAccountType };
+                  const fullConfig = { ...config, accountType: mt5AccountType };
                   if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
                     wsRef.current.send(JSON.stringify({
                       name: "cloud-bot-configure",

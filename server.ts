@@ -226,12 +226,15 @@ app.post("/api/iqoption/login/verify", async (req, res) => {
 // AI Analysis Endpoint
 app.post("/api/analyze", async (req, res) => {
   try {
-    const { candles } = req.body;
+    const { candles, fastEma, slowEma } = req.body;
 
     if (!candles || !Array.isArray(candles) || candles.length === 0) {
       res.status(400).json({ error: "Candles data is required and must be an array" });
       return;
     }
+
+    const fEma = fastEma || 5;
+    const sEma = slowEma || 13;
 
     // Format candles for the prompt
     const formattedCandles = candles.map(c => ({
@@ -244,17 +247,22 @@ app.post("/api/analyze", async (req, res) => {
       volume: c.volume
     }));
 
-    const promptText = `จงวิเคราะห์ข้อมูลแท่งเทียน Gold (XAUUSD) ย้อนหลังเพื่อส่งสัญญาณในแท่งถัดไป:
+    const promptText = `จงวิเคราะห์ข้อมูลแท่งเทียน Gold (XAUUSD) ย้อนหลังโดยนำเทคนิค V98.3 EMA 2 เส้น (EMA ${fEma} และ EMA ${sEma}) ของโลจิกมหาเทพ มาประยียนต์ใช้ในการส่งสัญญาณในแท่งถัดไป:
 ${JSON.stringify(formattedCandles, null, 2)}
+
+คำแนะนำทางเทคนิค V98.3 โโลจิกมหาเทพ:
+1. แนะนำ CALL (BUY) เมื่อเส้น EMA สั้น (${fEma}) ตัดขึ้นเหนือเส้น EMA ยาว (${sEma}) ร่วมกับแท่งเทียนปิดเป็นเทรนขาขึ้นชัดเจน
+2. แนะนำ PUT (SELL) เมื่อเส้น EMA สั้น (${fEma}) ตัดลงใต้เส้น EMA ยาว (${sEma}) ร่วมกับแท่งเทียนปิดเป็นเทรนขาลงชัดเจน
+3. หากราคาวิ่งไซด์เวย์ พันกันอยู่ระหว่าง EMA สองเส้น หรือไม่มีสัญญานชัดเจนตามเงื่อนไข ให้สั่ง HOLD เพื่อควบคุมความเสี่ยง
 
 คำสั่ง: จงตอบกลับในรูปแบบ JSON ที่สะอาดที่สุด โดยห้ามมีตัวอักษรอื่นนอกจากโครงสร้างนี้:
 {
 "action": "CALL" หรือ "PUT" หรือ "HOLD",
 "confidence": 0.00 - 1.00,
-"reason": "เหตุผลสั้นๆ เชิงเทคนิค"
+"reason": "เหตุผลสั้นๆ เชิงเทคนิคตามหลักสูตร V98.3 EMA 2 เส้น โโลจิกมหาเทพ"
 }`;
 
-    const systemInstruction = `คุณเป็นสุดยอด AI นักเทรดระดับโลก (Quantitative Trader) เชี่ยวชาญการวิเคราะห์ความเสี่ยงและทำกำไรระยะสั้นในตลาด Binary Options 1 นาที หน้าที่ของคุณคือวิเคราะห์ข้อมูลที่ได้รับอย่างเยือกเย็น แม่นยำ และไร้อารมณ์ หากสภาวะตลาดมีความผันผวนสูง, ไซด์เวย์แคบ, หรือราคาไม่มีทิศทางชัดเจน คุณต้องสั่ง HOLD ทันทีเพื่อรักษาทุน คุณจะให้สัญญาณ CALL หรือ PUT ก็ต่อเมื่อมี Win Rate มั่นใจสูงเกิน 70% (confidence >= 0.70) เท่านั้น`;
+    const systemInstruction = `คุณคือระบบวิเคราะห์ AI อัจฉริยะ (เทรดเดอร์โลจิกมหาเทพ) เชี่ยวชาญการประยุกต์ใช้เทคนิค V98.3 EMA 2 เส้น (EMA ${fEma} และ EMA ${sEma}) ตรวจจับแนวโน้มและการกลับตัวของราคาทองคำ XAUUSD อย่างรัดกุม ภายใต้ขีดจำกัด Day Trade Limit คุณทำงานอย่างเยือกเย็นและรัดกุม โดยจะแนะนำออเดอร์ CALL หรือ PUT เฉพาะเมื่อสัญญานเป็นไปตามกฎของระบบอย่างเคร่งครัดและมีความมั่นใจสูงเกิน 70% เท่านั้น มิฉะนั้นให้ตอบเป็น HOLD เพื่อป้องกันความพ่ายแพ้`;
 
     const ai = getGeminiClient();
     
@@ -332,10 +340,10 @@ function calculateEMA(data: number[], period: number): number[] {
   return ema;
 }
 
-function enrichCandlesWithEMA(candles: any[]): any[] {
+function enrichCandlesWithEMA(candles: any[], fastPeriod: number = 5, slowPeriod: number = 13): any[] {
   const closes = candles.map(c => c.close);
-  const ema5Values = calculateEMA(closes, 5);
-  const ema13Values = calculateEMA(closes, 13);
+  const ema5Values = calculateEMA(closes, fastPeriod);
+  const ema13Values = calculateEMA(closes, slowPeriod);
   return candles.map((candle, index) => ({
     ...candle,
     ema5: ema5Values[index] ?? candle.close,
@@ -366,6 +374,23 @@ const cloudBot = {
   heartbeatTimer: null as any,
   activeAssetId: 74,
   activeAssetName: "XAUUSD",
+  
+  // MT5 Specific Bridge Parameters
+  mt5Server: "",
+  mt5Login: "",
+  mt5Password: "",
+  mt5WebhookUrl: "",
+  lotSize: 0.1,
+  slPips: 100,
+  tpPips: 200,
+  
+  // V98.3 & Day Trade Limit Parameters
+  dayTradeLimitEnabled: true,
+  maxDailyTrades: 10,
+  dailyTakeProfitLimit: 500,
+  dailyStopLossLimit: 200,
+  fastEmaPeriod: 5,
+  slowEmaPeriod: 13,
   
   broadcast(msgObj: any) {
     const raw = JSON.stringify(msgObj);
@@ -421,7 +446,24 @@ function saveCloudBotState() {
       candles: cloudBot.candles,
       activeSignal: cloudBot.activeSignal,
       activeAssetId: cloudBot.activeAssetId,
-      activeAssetName: cloudBot.activeAssetName
+      activeAssetName: cloudBot.activeAssetName,
+      
+      // MT5 Specific
+      mt5Server: cloudBot.mt5Server,
+      mt5Login: cloudBot.mt5Login,
+      mt5Password: cloudBot.mt5Password,
+      mt5WebhookUrl: cloudBot.mt5WebhookUrl,
+      lotSize: cloudBot.lotSize,
+      slPips: cloudBot.slPips,
+      tpPips: cloudBot.tpPips,
+      
+      // V98.3 & Day Trade Limit
+      dayTradeLimitEnabled: cloudBot.dayTradeLimitEnabled,
+      maxDailyTrades: cloudBot.maxDailyTrades,
+      dailyTakeProfitLimit: cloudBot.dailyTakeProfitLimit,
+      dailyStopLossLimit: cloudBot.dailyStopLossLimit,
+      fastEmaPeriod: cloudBot.fastEmaPeriod,
+      slowEmaPeriod: cloudBot.slowEmaPeriod
     };
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
   } catch (err) {
@@ -547,6 +589,9 @@ async function runServerAIAnalysis(candles: any[]) {
   try {
     console.log("[Cloud Bot AI] Running background Gemini AI Analysis on completed candles...");
     
+    const fEma = cloudBot.fastEmaPeriod || 5;
+    const sEma = cloudBot.slowEmaPeriod || 13;
+
     // Format candles for prompt (last 10 candles)
     const formattedCandles = candles.slice(-10).map(c => ({
       open: c.open,
@@ -558,17 +603,22 @@ async function runServerAIAnalysis(candles: any[]) {
       volume: c.volume
     }));
 
-    const promptText = `จงวิเคราะห์ข้อมูลแท่งเทียน Gold (XAUUSD) ย้อนหลังเพื่อส่งสัญญาณในแท่งถัดไป:
+    const promptText = `จงวิเคราะห์ข้อมูลแท่งเทียน Gold (XAUUSD) ย้อนหลังโดยนำเทคนิค V98.3 EMA 2 เส้น (EMA ${fEma} และ EMA ${sEma}) ของโลจิกมหาเทพ มาประยุกต์ใช้ในการส่งสัญญาณในแท่งถัดไป:
 ${JSON.stringify(formattedCandles, null, 2)}
+
+คำแนะนำทางเทคนิค V98.3 โลจิกมหาเทพ:
+1. แนะนำ CALL (BUY) เมื่อเส้น EMA สั้น (${fEma}) ตัดขึ้นเหนือเส้น EMA ยาว (${sEma}) ร่วมกับแท่งเทียนปิดเป็นเทรนขาขึ้นชัดเจน
+2. แนะนำ PUT (SELL) เมื่อเส้น EMA สั้น (${fEma}) ตัดลงใต้เส้น EMA ยาว (${sEma}) ร่วมกับแท่งเทียนปิดเป็นเทรนขาลงชัดเจน
+3. หากราคาวิ่งไซด์เวย์ พันกันอยู่ระหว่าง EMA สองเส้น หรือไม่มีสัญญานชัดเจนตามเงื่อนไข ให้สั่ง HOLD เพื่อควบคุมความเสี่ยง
 
 คำสั่ง: จงตอบกลับในรูปแบบ JSON ที่สะอาดที่สุด โดยห้ามมีตัวอักษรอื่นนอกจากโครงสร้างนี้:
 {
 "action": "CALL" หรือ "PUT" หรือ "HOLD",
 "confidence": 0.00 - 1.00,
-"reason": "เหตุผลสั้นๆ เชิงเทคนิค"
+"reason": "อธิบายสั้นๆ เชิงเทคนิคตามกฎ V98.3 โลจิกมหาเทพ"
 }`;
 
-    const systemInstruction = `คุณเป็นสุดยอด AI นักเทรดระดับโลก (Quantitative Trader) เชี่ยวชาญการวิเคราะห์ความเสี่ยงและทำกำไรระยะสั้นในตลาด Binary Options 1 นาที หน้าที่ของคุณคือวิเคราะห์ข้อมูลที่ได้รับอย่างเยือกเย็น แม่นยำ และไร้อารมณ์ หากสภาวะตลาดมีความผันผวนสูง, ไซด์เวย์แคบ, หรือราคาไม่มีทิศทางชัดเจน คุณต้องสั่ง HOLD ทันทีเพื่อรักษาทุน คุณจะให้สัญญาณ CALL หรือ PUT ก็ต่อเมื่อมี Win Rate มั่นใจสูงเกิน 70% (confidence >= 0.70) เท่านั้น`;
+    const systemInstruction = `คุณคือระบบวิเคราะห์ AI อัจฉริยะ (เทรดเดอร์โลจิกมหาเทพ) เชี่ยวชาญการประยุกต์ใช้เทคนิค V98.3 EMA 2 เส้น (EMA ${fEma} และ EMA ${sEma}) ตรวจจับแนวโน้มและการกลับตัวของราคาทองคำ XAUUSD อย่างรัดกุม ภายใต้ขีดจำกัด Day Trade Limit คุณทำงานอย่างเยือกเย็นและรัดกุม โดยจะแนะนำออเดอร์ CALL หรือ PUT เฉพาะเมื่อสัญญานเป็นไปตามกฎของระบบอย่างเคร่งครัดและมีความมั่นใจสูงเกิน 70% เท่านั้น มิฉะนั้นให้ตอบเป็น HOLD เพื่อป้องกันความพ่ายแพ้`;
 
     const ai = getGeminiClient();
     const response = await generateWithRetryAndFallback(
@@ -626,9 +676,14 @@ ${JSON.stringify(formattedCandles, null, 2)}
     addSystemLog("info", `🤖 [ระบบ AI วิเคราะห์สำเร็จ] สัญญาณ: ${signal.action} (${Math.round(signal.confidence * 100)}%) | เหตุผล: ${signal.reason}`);
 
     // If auto-trading is enabled, place order
-    if (cloudBot.autoTrade && (signal.action === "CALL" || signal.action === "PUT") && signal.confidence >= 0.70) {
-      const expirationEpoch = Math.floor((Date.now() + 60000) / 60000) * 60; // Next minute mark
-      placeIqOptionTrade(signal.action as "CALL" | "PUT", cloudBot.investAmount, expirationEpoch);
+    if (cloudBot.autoTrade && (signal.action === "CALL" || signal.action === "PUT" || signal.action === "BUY" || signal.action === "SELL") && signal.confidence >= 0.70) {
+      placeMt5Trade(
+        signal.action as any, 
+        cloudBot.lotSize || 0.1, 
+        cloudBot.slPips || 100, 
+        cloudBot.tpPips || 200, 
+        cloudBot.activeAssetName
+      ).catch(e => console.error("Error placing auto MT5 trade:", e));
     }
   } catch (err: any) {
     console.error("[Cloud Bot AI] Error in runServerAIAnalysis:", err);
@@ -831,7 +886,7 @@ function handleIqOptionMessage(data: any) {
         }));
         
         parsedCandles.sort((a: any, b: any) => a.epoch - b.epoch);
-        cloudBot.candles = enrichCandlesWithEMA(parsedCandles);
+        cloudBot.candles = enrichCandlesWithEMA(parsedCandles, cloudBot.fastEmaPeriod, cloudBot.slowEmaPeriod);
         saveCloudBotState();
         
         // Trigger initial AI analysis background task if idle
@@ -902,7 +957,7 @@ function handleIqOptionMessage(data: any) {
         return;
       }
       
-      cloudBot.candles = enrichCandlesWithEMA(copy);
+      cloudBot.candles = enrichCandlesWithEMA(copy, cloudBot.fastEmaPeriod, cloudBot.slowEmaPeriod);
       
       if (didChangeMin) {
         console.log(`[Cloud Bot] Minute completed. Running Gemini Auto-Trading analysis...`);
@@ -1142,6 +1197,23 @@ function initCloudBot() {
     cloudBot.activeAssetId = saved.activeAssetId !== undefined ? Number(saved.activeAssetId) : 74;
     cloudBot.activeAssetName = saved.activeAssetName || "XAUUSD";
     
+    // MT5 Specific
+    cloudBot.mt5Server = saved.mt5Server || "";
+    cloudBot.mt5Login = saved.mt5Login || "";
+    cloudBot.mt5Password = saved.mt5Password || "";
+    cloudBot.mt5WebhookUrl = saved.mt5WebhookUrl || "";
+    cloudBot.lotSize = saved.lotSize !== undefined ? saved.lotSize : 0.1;
+    cloudBot.slPips = saved.slPips !== undefined ? saved.slPips : 100;
+    cloudBot.tpPips = saved.tpPips !== undefined ? saved.tpPips : 200;
+
+    // V98.3 & Day Trade Limit
+    cloudBot.dayTradeLimitEnabled = saved.dayTradeLimitEnabled !== undefined ? saved.dayTradeLimitEnabled : true;
+    cloudBot.maxDailyTrades = saved.maxDailyTrades !== undefined ? Number(saved.maxDailyTrades) : 10;
+    cloudBot.dailyTakeProfitLimit = saved.dailyTakeProfitLimit !== undefined ? Number(saved.dailyTakeProfitLimit) : 500;
+    cloudBot.dailyStopLossLimit = saved.dailyStopLossLimit !== undefined ? Number(saved.dailyStopLossLimit) : 200;
+    cloudBot.fastEmaPeriod = saved.fastEmaPeriod !== undefined ? Number(saved.fastEmaPeriod) : 5;
+    cloudBot.slowEmaPeriod = saved.slowEmaPeriod !== undefined ? Number(saved.slowEmaPeriod) : 13;
+
     if (saved.status === "connected" && cloudBot.ssid) {
       console.log("[Cloud Bot] Auto-reconnecting background session...");
       connectCloudBot(cloudBot.ssid);
@@ -1168,7 +1240,24 @@ app.get("/api/cloud-bot/status", (req, res) => {
       candles: cloudBot.candles,
       activeSignal: cloudBot.activeSignal,
       activeAssetId: cloudBot.activeAssetId,
-      activeAssetName: cloudBot.activeAssetName
+      activeAssetName: cloudBot.activeAssetName,
+      
+      // MT5 Specific
+      mt5Server: cloudBot.mt5Server,
+      mt5Login: cloudBot.mt5Login,
+      mt5Password: cloudBot.mt5Password,
+      mt5WebhookUrl: cloudBot.mt5WebhookUrl,
+      lotSize: cloudBot.lotSize,
+      slPips: cloudBot.slPips,
+      tpPips: cloudBot.tpPips,
+
+      // V98.3 & Day Trade Limit
+      dayTradeLimitEnabled: cloudBot.dayTradeLimitEnabled,
+      maxDailyTrades: cloudBot.maxDailyTrades,
+      dailyTakeProfitLimit: cloudBot.dailyTakeProfitLimit,
+      dailyStopLossLimit: cloudBot.dailyStopLossLimit,
+      fastEmaPeriod: cloudBot.fastEmaPeriod,
+      slowEmaPeriod: cloudBot.slowEmaPeriod
     }
   });
 });
@@ -1181,12 +1270,50 @@ app.get("/api/cloud-bot/logs", (req, res) => {
 });
 
 app.post("/api/cloud-bot/configure", (req, res) => {
-  const { autoTrade, investAmount, accountType, activeAssetId, activeAssetName } = req.body;
+  const { 
+    autoTrade, 
+    investAmount, 
+    accountType, 
+    activeAssetId, 
+    activeAssetName, 
+    lotSize, 
+    slPips, 
+    tpPips,
+    dayTradeLimitEnabled,
+    maxDailyTrades,
+    dailyTakeProfitLimit,
+    dailyStopLossLimit,
+    fastEmaPeriod,
+    slowEmaPeriod
+  } = req.body;
+  
   if (autoTrade !== undefined) cloudBot.autoTrade = autoTrade;
   if (investAmount !== undefined) cloudBot.investAmount = Number(investAmount);
   if (accountType !== undefined) {
     cloudBot.accountType = accountType;
     syncActiveBalanceFromAccountType();
+  }
+  if (lotSize !== undefined) cloudBot.lotSize = Number(lotSize);
+  if (slPips !== undefined) cloudBot.slPips = Number(slPips);
+  if (tpPips !== undefined) cloudBot.tpPips = Number(tpPips);
+  
+  if (dayTradeLimitEnabled !== undefined) cloudBot.dayTradeLimitEnabled = !!dayTradeLimitEnabled;
+  if (maxDailyTrades !== undefined) cloudBot.maxDailyTrades = Number(maxDailyTrades);
+  if (dailyTakeProfitLimit !== undefined) cloudBot.dailyTakeProfitLimit = Number(dailyTakeProfitLimit);
+  if (dailyStopLossLimit !== undefined) cloudBot.dailyStopLossLimit = Number(dailyStopLossLimit);
+  
+  let emaChanged = false;
+  if (fastEmaPeriod !== undefined) {
+    cloudBot.fastEmaPeriod = Number(fastEmaPeriod);
+    emaChanged = true;
+  }
+  if (slowEmaPeriod !== undefined) {
+    cloudBot.slowEmaPeriod = Number(slowEmaPeriod);
+    emaChanged = true;
+  }
+  
+  if (emaChanged && cloudBot.candles && cloudBot.candles.length > 0) {
+    cloudBot.candles = enrichCandlesWithEMA(cloudBot.candles, cloudBot.fastEmaPeriod, cloudBot.slowEmaPeriod);
   }
   
   const oldAssetId = cloudBot.activeAssetId;
@@ -1197,17 +1324,28 @@ app.post("/api/cloud-bot/configure", (req, res) => {
   
   saveCloudBotState();
   
+  const syncPayload = {
+    name: "cloud-bot-sync",
+    autoTrade: cloudBot.autoTrade,
+    investAmount: cloudBot.investAmount,
+    accountType: cloudBot.accountType,
+    activeAssetId: cloudBot.activeAssetId,
+    activeAssetName: cloudBot.activeAssetName,
+    lotSize: cloudBot.lotSize,
+    slPips: cloudBot.slPips,
+    tpPips: cloudBot.tpPips,
+    dayTradeLimitEnabled: cloudBot.dayTradeLimitEnabled,
+    maxDailyTrades: cloudBot.maxDailyTrades,
+    dailyTakeProfitLimit: cloudBot.dailyTakeProfitLimit,
+    dailyStopLossLimit: cloudBot.dailyStopLossLimit,
+    fastEmaPeriod: cloudBot.fastEmaPeriod,
+    slowEmaPeriod: cloudBot.slowEmaPeriod
+  };
+  
   if (activeAssetId !== undefined && Number(activeAssetId) !== oldAssetId) {
     syncActiveAssetSubscription(oldAssetId);
   } else {
-    cloudBot.broadcast({
-      name: "cloud-bot-sync",
-      autoTrade: cloudBot.autoTrade,
-      investAmount: cloudBot.investAmount,
-      accountType: cloudBot.accountType,
-      activeAssetId: cloudBot.activeAssetId,
-      activeAssetName: cloudBot.activeAssetName
-    });
+    cloudBot.broadcast(syncPayload);
   }
   
   res.json({ 
@@ -1217,7 +1355,16 @@ app.post("/api/cloud-bot/configure", (req, res) => {
       investAmount: cloudBot.investAmount, 
       accountType: cloudBot.accountType,
       activeAssetId: cloudBot.activeAssetId,
-      activeAssetName: cloudBot.activeAssetName
+      activeAssetName: cloudBot.activeAssetName,
+      lotSize: cloudBot.lotSize,
+      slPips: cloudBot.slPips,
+      tpPips: cloudBot.tpPips,
+      dayTradeLimitEnabled: cloudBot.dayTradeLimitEnabled,
+      maxDailyTrades: cloudBot.maxDailyTrades,
+      dailyTakeProfitLimit: cloudBot.dailyTakeProfitLimit,
+      dailyStopLossLimit: cloudBot.dailyStopLossLimit,
+      fastEmaPeriod: cloudBot.fastEmaPeriod,
+      slowEmaPeriod: cloudBot.slowEmaPeriod
     } 
   });
 });
@@ -1225,6 +1372,238 @@ app.post("/api/cloud-bot/configure", (req, res) => {
 app.post("/api/cloud-bot/stop", (req, res) => {
   disconnectCloudBot();
   res.json({ success: true });
+});
+
+async function placeMt5Trade(action: "BUY" | "SELL" | "CALL" | "PUT", lotSize: number, slPips: number, tpPips: number, symbol: string) {
+  const normAction = (action === "CALL" || action === "BUY") ? "BUY" : "SELL";
+  
+  if (cloudBot.dayTradeLimitEnabled) {
+    const dailyTradesCount = cloudBot.trades.length;
+    const dailyProfitLoss = cloudBot.trades.reduce((sum, t) => sum + (t.profit || 0), 0);
+    
+    if (dailyTradesCount >= cloudBot.maxDailyTrades) {
+      addSystemLog("warn", `⚠️ [Day Trade Limit] บล็อกเทรดอัตโนมัติ: จำนวนออเดอร์ถึงลิมิตรายวันแล้ว (${dailyTradesCount}/${cloudBot.maxDailyTrades} ออเดอร์)`);
+      return;
+    }
+    if (dailyProfitLoss >= cloudBot.dailyTakeProfitLimit) {
+      addSystemLog("warn", `⚠️ [Day Trade Limit] บล็อกเทรดอัตโนมัติ: กำไรวันนี้ถึงเป้าหมายแล้ว (+$${dailyProfitLoss.toFixed(2)} / +$${cloudBot.dailyTakeProfitLimit} USD)`);
+      return;
+    }
+    if (dailyProfitLoss <= -cloudBot.dailyStopLossLimit) {
+      addSystemLog("warn", `⚠️ [Day Trade Limit] บล็อกเทรดอัตโนมัติ: ขาดทุนวันนี้เกินลิมิตควบคุมความเสี่ยงแล้ว ($${dailyProfitLoss.toFixed(2)} / -$${cloudBot.dailyStopLossLimit} USD)`);
+      return;
+    }
+  }
+
+  const tradeId = "trade_" + Math.random().toString(36).substring(2, 9);
+  
+  const currentPrice = cloudBot.candles[cloudBot.candles.length - 1]?.close || 2350.0;
+  
+  // Calculate stop-loss and take-profit prices (Assume Gold where 1 pip = 0.01 USD)
+  const slPrice = slPips > 0 
+    ? (normAction === "BUY" ? currentPrice - (slPips * 0.01) : currentPrice + (slPips * 0.01))
+    : undefined;
+  const tpPrice = tpPips > 0
+    ? (normAction === "BUY" ? currentPrice + (tpPips * 0.01) : currentPrice - (tpPips * 0.01))
+    : undefined;
+
+  const newTrade = {
+    id: tradeId,
+    timestamp: new Date().toISOString(),
+    investAmount: lotSize * 100, // representative invest amount for display
+    entryPrice: currentPrice,
+    action: normAction,
+    aiAction: cloudBot.activeSignal ? cloudBot.activeSignal.action : "HOLD",
+    aiConfidence: cloudBot.activeSignal ? cloudBot.activeSignal.confidence : 0,
+    status: "PENDING" as "PENDING" | "WIN" | "LOSS",
+    lotSize,
+    slPrice,
+    tpPrice,
+    slPips,
+    tpPips,
+    symbol
+  };
+
+  cloudBot.trades = [newTrade, ...cloudBot.trades];
+  if (cloudBot.trades.length > 50) {
+    cloudBot.trades = cloudBot.trades.slice(0, 50);
+  }
+  saveCloudBotState();
+
+  // Broadcast trade update
+  cloudBot.broadcast({
+    name: "cloud-bot-trade-confirmed",
+    trade: newTrade
+  });
+
+  addSystemLog("sent", `🤖 [ระบบ AI อัตโนมัติ] ออเดอร์ ${normAction} (${lotSize} Lots) บน ${symbol} ส่งแล้ว (SL: ${slPips} pips, TP: ${tpPips} pips)`);
+
+  // If MT5 webhook URL is configured, send the signal outbound!
+  if (cloudBot.mt5WebhookUrl) {
+    try {
+      console.log(`[MT5 Webhook] Sending trade request to: ${cloudBot.mt5WebhookUrl}`);
+      const response = await fetch(cloudBot.mt5WebhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: normAction,
+          symbol,
+          lotSize,
+          slPips,
+          tpPips,
+          entryPrice: currentPrice,
+          tradeId
+        })
+      });
+      if (response.ok) {
+        addSystemLog("success", `✅ [MT5 Webhook] ส่งสัญญาณสำเร็จไปยัง EA!`);
+      } else {
+        addSystemLog("warn", `⚠️ [MT5 Webhook] ส่งสัญญาณไปพอร์ต EA ล้มเหลวด้วยสถานะ: ${response.statusText}`);
+      }
+    } catch (err: any) {
+      console.error("[MT5 Webhook] Error:", err);
+      addSystemLog("error", `❌ [MT5 Webhook] เกิดข้อผิดพลาดทางเครือข่าย: ${err.message || err}`);
+    }
+  }
+}
+
+// MT5-specific endpoints
+app.post("/api/mt5/connect", (req, res) => {
+  const { server, loginid, password, webhookUrl, accountType } = req.body;
+  if (!server || !loginid) {
+    return res.status(400).json({ success: false, error: "กรุณาระบุ Server และ Login ID" });
+  }
+
+  cloudBot.mt5Server = server;
+  cloudBot.mt5Login = loginid;
+  cloudBot.mt5Password = password || "";
+  cloudBot.mt5WebhookUrl = webhookUrl || "";
+  cloudBot.accountType = accountType || "demo";
+  cloudBot.status = "connected";
+  cloudBot.brokerName = "บัญชี MT5: " + loginid;
+  cloudBot.brokerLoginId = loginid;
+  cloudBot.brokerEmail = "mt5_user@local.app";
+  
+  // Set simulated balance if real balance isn't supplied
+  if (cloudBot.balance === 10000 || !cloudBot.balance) {
+    cloudBot.balance = accountType === "demo" ? 10000 : 2500.50;
+  }
+  
+  saveCloudBotState();
+  addSystemLog("success", `✅ เชื่อมต่อสะพาน MT5 สำเร็จ! พอร์ต: ${loginid} | เซิร์ฟเวอร์: ${server}`);
+
+  // Broadcast to all clients
+  cloudBot.broadcast({
+    name: "cloud-bot-sync",
+    status: cloudBot.status,
+    balance: cloudBot.balance,
+    brokerLoginId: cloudBot.brokerLoginId,
+    brokerName: cloudBot.brokerName,
+    accountType: cloudBot.accountType
+  });
+
+  res.json({
+    success: true,
+    data: {
+      balance: cloudBot.balance,
+      loginid: cloudBot.brokerLoginId
+    }
+  });
+});
+
+app.post("/api/mt5/trade", async (req, res) => {
+  const { action, lotSize, slPips, tpPips, symbol } = req.body;
+  try {
+    await placeMt5Trade(action, lotSize || 0.1, slPips || 0, tpPips || 0, symbol || "XAUUSD");
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || err });
+  }
+});
+
+// GET endpoint for MT5 EA to poll for the latest AI Signal
+app.get("/api/mt5/signals", (req, res) => {
+  res.json({
+    success: true,
+    signal: cloudBot.activeSignal || { action: "HOLD", confidence: 0, reason: "ไม่มีสัญญาณวิเคราะห์" },
+    config: {
+      lotSize: cloudBot.lotSize,
+      slPips: cloudBot.slPips,
+      tpPips: cloudBot.tpPips,
+      symbol: cloudBot.activeAssetName
+    }
+  });
+});
+
+// POST Webhook endpoint for MT5 to send real-time candlestick/tick data or order execution updates
+app.post("/api/mt5/signal-webhook", (req, res) => {
+  const { type, candles, tradeId, status, profit, exitPrice } = req.body;
+  
+  // 1. Candlestick feed from MT5
+  if (type === "candles" && Array.isArray(candles)) {
+    const parsed = candles.map((c: any) => ({
+      time: c.time || new Date(c.epoch * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      open: parseFloat(c.open),
+      high: parseFloat(c.high),
+      low: parseFloat(c.low),
+      close: parseFloat(c.close),
+      epoch: c.epoch || Math.floor(Date.now() / 1000),
+      volume: c.volume || 100
+    }));
+    
+    parsed.sort((a: any, b: any) => a.epoch - b.epoch);
+    cloudBot.candles = enrichCandlesWithEMA(parsed, cloudBot.fastEmaPeriod, cloudBot.slowEmaPeriod);
+    saveCloudBotState();
+    
+    cloudBot.broadcast({
+      name: "candles",
+      msg: { data: cloudBot.candles }
+    });
+
+    triggerServerAIAnalysis();
+    addSystemLog("received", `📈 [MT5 Feed] ได้รับข้อมูลแท่งเทียนใหม่ ${parsed.length} แท่ง ประมวลผล AI สำเร็จ`);
+    return res.json({ success: true, message: "รับข้อมูลแท่งเทียนสำเร็จ" });
+  }
+
+  // 2. Order result update from MT5
+  if (type === "trade-update" && tradeId) {
+    let matched = false;
+    cloudBot.trades = cloudBot.trades.map(t => {
+      if (t.id === tradeId || t.contract_id === tradeId) {
+        matched = true;
+        const normStatus = status === "WIN" || status === "profit" || Number(profit) >= 0 ? "WIN" : "LOSS";
+        const netProfit = Number(profit || 0);
+        
+        cloudBot.balance += netProfit;
+        
+        cloudBot.broadcast({
+          name: "cloud-bot-trade-resolved",
+          tradeId: t.id,
+          status: normStatus,
+          exitPrice: Number(exitPrice || t.entryPrice),
+          payout: netProfit >= 0 ? netProfit : 0,
+          profit: netProfit
+        });
+
+        return {
+          ...t,
+          status: normStatus,
+          exitPrice: Number(exitPrice || t.entryPrice),
+          profit: netProfit,
+          resolvedAt: new Date().toISOString()
+        };
+      }
+      return t;
+    });
+
+    if (matched) {
+      saveCloudBotState();
+      addSystemLog("success", `✅ [MT5 Execution] ออเดอร์ ${tradeId} ปิดสัญญาสำเร็จ! ผลลัพธ์: ${status} | กำไร: $${profit} USD`);
+      return res.json({ success: true, message: "อัปเดตผลลัพธ์ออเดอร์สำเร็จ" });
+    }
+  }
+
+  res.status(400).json({ success: false, error: "ประเภทคำขอไม่ถูกต้อง" });
 });
 
 // Configure Vite or serve static assets

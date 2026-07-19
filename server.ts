@@ -374,6 +374,7 @@ const cloudBot = {
   heartbeatTimer: null as any,
   activeAssetId: 74,
   activeAssetName: "XAUUSD",
+  currency: "USD",
   
   // MT5 Specific Bridge Parameters
   mt5Server: "",
@@ -1537,7 +1538,7 @@ app.get("/api/mt5/signals", (req, res) => {
 
 // POST Webhook endpoint for MT5 to send real-time candlestick/tick data or order execution updates
 app.post("/api/mt5/signal-webhook", (req, res) => {
-  const { type, candles, tradeId, status, profit, exitPrice, balance, equity, loginid, server } = req.body;
+  const { type, candles, tradeId, status, profit, exitPrice, balance, equity, loginid, server, currency } = req.body;
   
   let stateChanged = false;
   
@@ -1559,6 +1560,11 @@ app.post("/api/mt5/signal-webhook", (req, res) => {
     cloudBot.mt5Server = String(server);
     stateChanged = true;
   }
+
+  if (currency !== undefined && currency !== "") {
+    cloudBot.currency = String(currency);
+    stateChanged = true;
+  }
   
   if (stateChanged) {
     saveCloudBotState();
@@ -1566,8 +1572,10 @@ app.post("/api/mt5/signal-webhook", (req, res) => {
       name: "cloud-bot-sync",
       status: cloudBot.status,
       balance: cloudBot.balance,
+      currency: cloudBot.currency || "USD",
       brokerLoginId: cloudBot.brokerLoginId,
       brokerName: cloudBot.brokerName,
+      brokerEmail: cloudBot.brokerEmail || "mt5_user@local.app",
       accountType: cloudBot.accountType
     });
   }

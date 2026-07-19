@@ -65,6 +65,7 @@ interface TradingPanelProps {
   setFastEmaPeriod: (val: number) => void;
   slowEmaPeriod: number;
   setSlowEmaPeriod: (val: number) => void;
+  currencySymbol?: string;
 }
 
 export default function TradingPanel({
@@ -101,7 +102,8 @@ export default function TradingPanel({
   fastEmaPeriod,
   setFastEmaPeriod,
   slowEmaPeriod,
-  setSlowEmaPeriod
+  setSlowEmaPeriod,
+  currencySymbol = "$"
 }: TradingPanelProps) {
   const quickLots = [0.01, 0.1, 0.5, 1.0, 2.0];
   const quickSl = [100, 200, 300, 500];
@@ -299,7 +301,7 @@ export default function TradingPanel({
               บัญชีเงินทุน ({connectionMode === "live" ? (accountType === "real" ? "REAL" : "DEMO") : "DEMO"})
             </span>
             <span className="text-xl font-black font-mono text-emerald-400">
-              ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {currencySymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
         </div>
@@ -335,13 +337,13 @@ export default function TradingPanel({
             </div>
 
             <div>
-              <div className="text-[10px] text-slate-500 font-mono">ผลกำไรรวมวันนี้ (USD)</div>
+              <div className="text-[10px] text-slate-500 font-mono">ผลกำไรรวมวันนี้</div>
               <div className={`font-bold font-mono mt-0.5 ${dailyProfitLoss >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                {dailyProfitLoss >= 0 ? "+" : ""}${dailyProfitLoss.toFixed(2)}
+                {dailyProfitLoss >= 0 ? "+" : "-"}{currencySymbol}{Math.abs(dailyProfitLoss).toFixed(2)}
               </div>
               <div className="text-[9px] text-slate-500 mt-1 font-sans flex justify-between">
-                <span>SL: -${dailyStopLossLimit}</span>
-                <span>TP: +${dailyTakeProfitLimit}</span>
+                <span>SL: -{currencySymbol}{dailyStopLossLimit}</span>
+                <span>TP: +{currencySymbol}{dailyTakeProfitLimit}</span>
               </div>
             </div>
           </div>
@@ -630,7 +632,7 @@ export default function TradingPanel({
                   <div className="flex items-center gap-2.5 text-right">
                     <div>
                       <div className={`font-bold text-sm ${isProfit ? "text-emerald-400" : "text-red-400"}`}>
-                        {isProfit ? "+" : ""}${profit.toFixed(2)}
+                        {isProfit ? "+" : "-"}{currencySymbol}{Math.abs(profit).toFixed(2)}
                       </div>
                       <span className="text-[9px] text-slate-500 block">ทองคำ {currentPrice.toFixed(2)}</span>
                     </div>

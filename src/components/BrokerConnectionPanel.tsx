@@ -35,10 +35,13 @@ interface BrokerConnectionPanelProps {
   onConnect: () => void;
   onDisconnect: () => void;
   brokerAccountInfo: {
-    server: string;
+    server?: string;
     loginid: string;
     is_virtual: boolean;
     balance?: number;
+    currency?: string;
+    fullname?: string;
+    email?: string;
   } | null;
   errorMsg: string | null;
 }
@@ -183,6 +186,7 @@ void OnTimer() {
                       "\\"equity\\":" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + "," +
                       "\\"loginid\\":\\"" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\\"," +
                       "\\"server\\":\\"" + AccountInfoString(ACCOUNT_SERVER) + "\\"," +
+                       "\\"currency\\":\\"" + AccountInfoString(ACCOUNT_CURRENCY) + "\\",\\"" +
                       "\\"candles\\":" + candles_json + "}";
                       
    char post[], result[];
@@ -528,7 +532,10 @@ void ExecuteTrade(ENUM_ORDER_TYPE order_type, int sl_pips, int tp_pips, double l
                 {brokerAccountInfo?.balance !== undefined && (
                   <div className="flex justify-between items-center text-slate-300">
                     <span className="text-slate-400">บาลานซ์พอร์ต:</span>
-                    <span className="text-emerald-400 font-bold">${brokerAccountInfo.balance.toLocaleString()} USD</span>
+                    <span className="text-emerald-400 font-bold">
+                      {brokerAccountInfo.currency === "THB" || brokerAccountInfo.currency === "฿" ? "฿" : "$"}
+                      {brokerAccountInfo.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {brokerAccountInfo.currency || "USD"}
+                    </span>
                   </div>
                 )}
               </div>

@@ -52,10 +52,13 @@ export default function App() {
   const [mt5AccountType, setMt5AccountType] = useState<"demo" | "real">("demo");
   const [connectionStatus, setConnectionStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
   const [brokerAccountInfo, setBrokerAccountInfo] = useState<{
-    server: string;
+    server?: string;
+    email?: string;
+    fullname?: string;
     loginid: string;
     is_virtual: boolean;
     balance?: number;
+    currency?: string;
   } | null>(null);
   const [brokerErrorMsg, setBrokerErrorMsg] = useState<string | null>(null);
   const [tradeErrorMsg, setTradeErrorMsg] = useState<string | null>(null);
@@ -283,14 +286,16 @@ export default function App() {
             console.log("[Cloud Bot] State synced: disconnected. Retaining login state for manual or auto-reconnect.");
           }
         }
-        if (data.brokerEmail) {
-          setBrokerAccountInfo({
-            email: data.brokerEmail,
-            fullname: data.brokerName || "ผู้ใช้นักลงทุน",
-            loginid: data.brokerLoginId || "",
+        if (data.brokerEmail || data.brokerLoginId) {
+          setBrokerAccountInfo(prev => ({
+            email: data.brokerEmail || prev?.email,
+            fullname: data.brokerName || prev?.fullname || "ผู้ใช้นักลงทุน",
+            loginid: data.brokerLoginId || prev?.loginid || "",
             is_virtual: data.accountType === "demo",
-            balance: data.balance
-          });
+            balance: data.balance !== undefined ? data.balance : prev?.balance,
+            currency: data.currency || prev?.currency || "USD",
+            server: data.mt5Server || data.brokerServer || prev?.server
+          }));
         }
         if (data.balance !== undefined) {
           setBalance(data.balance);
@@ -319,8 +324,8 @@ export default function App() {
         return;
       }
 
-      if (data.name === "cloud-bot-ai-signal") {
-        setActiveSignal(data.signal);
+      if (data.name === "cloud-bot-ai-signal" || data.name === "cloud-bot-signal") {
+        setActiveSignal(data.signal || data.activeSignal);
         setTradeErrorMsg(null);
         return;
       }
@@ -1016,7 +1021,7 @@ export default function App() {
             {/* User Account Info */}
             <div className="bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800 text-slate-400 flex items-center gap-2">
               <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
-              <span>ผู้ใช้: <strong className="text-slate-200">pnmall4u@gmail.com</strong></span>
+              <span>ผู้ใช้: <strong className="text-slate-200">{brokerAccountInfo?.fullname || brokerAccountInfo?.email || "pnmall4u@gmail.com"}</strong></span>
             </div>
 
             {/* Model Badge */}
@@ -1028,10 +1033,15 @@ export default function App() {
             {/* Portfolio Demo Balance */}
             <div className="bg-slate-950 px-4 py-1 border border-slate-800 rounded-lg text-right">
               <div className="text-[9px] text-slate-500 uppercase font-bold">
-                {connectionMode === "live" ? (brokerAccountInfo?.is_virtual ? "บัญชีเดโมจริง (IQ OPTION)" : "บัญชีเงินจริง (IQ OPTION)") : "พอร์ตจำลอง (DEMO)"}
+                {connectionMode === "live" 
+                  ? (brokerAccountInfo?.server 
+                    ? (brokerAccountInfo?.is_virtual ? "บัญชีเดโมจริง (MT5)" : "บัญชีเงินจริง (MT5)")
+                    : (brokerAccountInfo?.is_virtual ? "บัญชีเดโมจริง (IQ OPTION)" : "บัญชีเงินจริง (IQ OPTION)")) 
+                  : "พอร์ตจำลอง (DEMO)"}
               </div>
               <div className="text-base font-black text-emerald-400">
-                ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {brokerAccountInfo?.currency === "THB" || brokerAccountInfo?.currency === "฿" ? "฿" : "$"}
+                {balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
           </div>
@@ -1170,6 +1180,7 @@ export default function App() {
               tradeErrorMsg={tradeErrorMsg}
               activeAssetId={activeAssetId}
               activeAssetName={activeAssetName}
+              currencySymbol={brokerAccountInfo?.currency === "THB" || brokerAccountInfo?.currency === "฿" ? "฿" : "$"}
               lotSize={lotSize}
               setLotSize={setLotSize}
               slPips={slPips}
@@ -1276,7 +1287,7 @@ export default function App() {
               <span className={`text-2xl font-black font-mono mt-1 block ${
                 totalProfitLoss >= 0 ? "text-emerald-400" : "text-red-400"
               }`}>
-                {totalProfitLoss >= 0 ? "+" : ""}${totalProfitLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {totalProfitLoss >= 0 ? "+" : "-"}{brokerAccountInfo?.currency === "THB" || brokerAccountInfo?.currency === "฿" ? "฿" : "$"}{Math.abs(totalProfitLoss).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
           </div>
@@ -1315,7 +1326,7 @@ export default function App() {
                         {new Date(trade.timestamp).toLocaleTimeString()}
                       </td>
                       <td className="py-3.5 px-4 font-mono font-semibold text-slate-300">
-                        ${trade.investAmount}
+                        {brokerAccountInfo?.currency === "THB" || brokerAccountInfo?.currency === "฿" ? "฿" : "$"}{trade.investAmount}
                       </td>
                       <td className="py-3.5 px-4 font-bold">
                         <span className={`inline-flex items-center gap-1 ${
@@ -1364,7 +1375,9 @@ export default function App() {
                         trade.status === "WIN" ? "text-emerald-400" : "text-red-400"
                       }`}>
                         {trade.status === "PENDING" ? "-" : (
-                          trade.status === "WIN" ? `+$${trade.profit}` : `-$${Math.abs(trade.profit ?? 0)}`
+                          trade.status === "WIN" 
+                            ? `+${brokerAccountInfo?.currency === "THB" || brokerAccountInfo?.currency === "฿" ? "฿" : "$"}${trade.profit}` 
+                            : `-${brokerAccountInfo?.currency === "THB" || brokerAccountInfo?.currency === "฿" ? "฿" : "$"}${Math.abs(trade.profit ?? 0)}`
                         )}
                       </td>
                     </tr>

@@ -451,7 +451,7 @@ export default function App() {
         const candleList = data.msg?.data || data.msg;
         if (candleList && Array.isArray(candleList)) {
           const parsedCandles: Candle[] = candleList.map((c: any) => ({
-            time: new Date((c.from || c.epoch) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            time: c.time || (c.from || c.epoch ? new Date((c.from || c.epoch) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""),
             open: parseFloat(c.open),
             high: parseFloat(c.high ?? c.max),
             low: parseFloat(c.low ?? c.min),
@@ -646,6 +646,7 @@ export default function App() {
       });
       setBalance(result.data?.balance || 10000.00);
       setConnectionStatus("connected");
+      setConnectionMode("live");
       
       connectWebSocket(mt5Login.trim());
     } catch (err: any) {
@@ -668,6 +669,7 @@ export default function App() {
     }
 
     setConnectionStatus("disconnected");
+    setConnectionMode("simulation");
     setBrokerAccountInfo(null);
     // Restore simulation candles
     setCandles(marketScenarios[0].candles);
@@ -1053,55 +1055,57 @@ export default function App() {
       <main className="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
         
         {/* Ticking timeline controller */}
-        <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-md">
-          <div className="flex items-center gap-2 text-xs">
-            <Clock className="w-4 h-4 text-indigo-400" />
-            <span className="text-slate-300 font-medium font-sans">
-              ตัวควบคุมเวลาจำลองตลาดทองคำ (Simulation Clock Control)
-            </span>
-          </div>
+        {connectionMode === "simulation" && (
+          <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-md">
+            <div className="flex items-center gap-2 text-xs">
+              <Clock className="w-4 h-4 text-indigo-400" />
+              <span className="text-slate-300 font-medium font-sans">
+                ตัวควบคุมเวลาจำลองตลาดทองคำ (Simulation Clock Control)
+              </span>
+            </div>
 
-          <div className="flex items-center gap-2 bg-slate-950 p-1 rounded-lg border border-slate-800">
-            <button
-              onClick={() => setSimulationSpeed("paused")}
-              className={`px-3 py-1.5 rounded font-mono text-xs flex items-center gap-1 cursor-pointer transition-colors ${
-                simulationSpeed === "paused"
-                  ? "bg-slate-800 text-white font-bold"
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
-              title="หยุดนิ่งเวลาตลาด"
-            >
-              <Pause className="w-3.5 h-3.5" />
-              <span>Pause</span>
-            </button>
-            
-            <button
-              onClick={() => setSimulationSpeed("normal")}
-              className={`px-3 py-1.5 rounded font-mono text-xs flex items-center gap-1 cursor-pointer transition-colors ${
-                simulationSpeed === "normal"
-                  ? "bg-indigo-600 text-white font-bold"
-                  : "text-slate-400 hover:text-slate-300"
-              }`}
-              title="เวลาปกติ 1วิ = 1วิ"
-            >
-              <Play className="w-3.5 h-3.5" />
-              <span>Normal 1x</span>
-            </button>
-            
-            <button
-              onClick={() => setSimulationSpeed("fast")}
-              className={`px-3 py-1.5 rounded font-mono text-xs flex items-center gap-1 cursor-pointer transition-colors ${
-                simulationSpeed === "fast"
-                  ? "bg-amber-600 text-white font-bold"
-                  : "text-slate-400 hover:text-slate-300"
-              }`}
-              title="เร่งความเร็วตลาดจำลอง 3 เท่า เพื่อเห็นผลลัพธ์ของแท่งเทียนด่วน"
-            >
-              <FastForward className="w-3.5 h-3.5" />
-              <span>Fast 3x (เทรดด่วน)</span>
-            </button>
+            <div className="flex items-center gap-2 bg-slate-950 p-1 rounded-lg border border-slate-800">
+              <button
+                onClick={() => setSimulationSpeed("paused")}
+                className={`px-3 py-1.5 rounded font-mono text-xs flex items-center gap-1 cursor-pointer transition-colors ${
+                  simulationSpeed === "paused"
+                    ? "bg-slate-800 text-white font-bold"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+                title="หยุดนิ่งเวลาตลาด"
+              >
+                <Pause className="w-3.5 h-3.5" />
+                <span>Pause</span>
+              </button>
+              
+              <button
+                onClick={() => setSimulationSpeed("normal")}
+                className={`px-3 py-1.5 rounded font-mono text-xs flex items-center gap-1 cursor-pointer transition-colors ${
+                  simulationSpeed === "normal"
+                    ? "bg-indigo-600 text-white font-bold"
+                    : "text-slate-400 hover:text-slate-300"
+                }`}
+                title="เวลาปกติ 1วิ = 1วิ"
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>Normal 1x</span>
+              </button>
+              
+              <button
+                onClick={() => setSimulationSpeed("fast")}
+                className={`px-3 py-1.5 rounded font-mono text-xs flex items-center gap-1 cursor-pointer transition-colors ${
+                  simulationSpeed === "fast"
+                    ? "bg-amber-600 text-white font-bold"
+                    : "text-slate-400 hover:text-slate-300"
+                }`}
+                title="เร่งความเร็วตลาดจำลอง 3 เท่า เพื่อเห็นผลลัพธ์ของแท่งเทียนด่วน"
+              >
+                <FastForward className="w-3.5 h-3.5" />
+                <span>Fast 3x (เทรดด่วน)</span>
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Primary Screen Grid (Chart, AI Analyser, Trade Terminal) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1115,19 +1119,22 @@ export default function App() {
               activeSignal={activeSignal ? { action: activeSignal.action, confidence: activeSignal.confidence } : undefined}
             />
 
-            {/* Sandbox scenarios */}
-            <ScenarioSelector
-              scenarios={marketScenarios}
-              activeScenarioId={activeScenarioId}
-              onSelectScenario={handleSelectScenario}
-            />
+            {/* Sandbox scenarios & Manual Modifiers - only in Simulation Mode */}
+            {connectionMode === "simulation" && (
+              <>
+                <ScenarioSelector
+                  scenarios={marketScenarios}
+                  activeScenarioId={activeScenarioId}
+                  onSelectScenario={handleSelectScenario}
+                />
 
-            {/* Manual Sandbox modifiers */}
-            <ManualSandboxForm
-              lastCandle={candles[candles.length - 1]}
-              onUpdateLastCandle={handleUpdateLastCandle}
-              onRunAnalysis={() => runAIAnalysis(candles)}
-            />
+                <ManualSandboxForm
+                  lastCandle={candles[candles.length - 1]}
+                  onUpdateLastCandle={handleUpdateLastCandle}
+                  onRunAnalysis={() => runAIAnalysis(candles)}
+                />
+              </>
+            )}
 
           </div>
 

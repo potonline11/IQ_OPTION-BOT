@@ -204,10 +204,11 @@ export default function App() {
             }
             if (bot.brokerLoginId) {
               setBrokerAccountInfo({
-                server: bot.brokerServer || "Local MT5",
+                server: bot.mt5Server || bot.brokerServer || "Local MT5",
                 loginid: bot.brokerLoginId,
                 is_virtual: bot.accountType === "demo",
-                balance: bot.balance
+                balance: bot.balance,
+                currency: bot.currency || "USD"
               });
             }
             // Auto-reconnect browser WS proxy to stream real-time updates

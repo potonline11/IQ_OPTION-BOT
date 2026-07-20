@@ -449,6 +449,7 @@ function saveCloudBotState() {
       activeSignal: cloudBot.activeSignal,
       activeAssetId: cloudBot.activeAssetId,
       activeAssetName: cloudBot.activeAssetName,
+      currency: cloudBot.currency,
       
       // MT5 Specific
       mt5Server: cloudBot.mt5Server,
@@ -1186,6 +1187,7 @@ function initCloudBot() {
   if (saved) {
     console.log("[Cloud Bot] Restoring saved state...");
     cloudBot.ssid = saved.ssid || "";
+    cloudBot.status = saved.status || "disconnected";
     cloudBot.accountType = saved.accountType || "demo";
     cloudBot.autoTrade = saved.autoTrade !== undefined ? saved.autoTrade : false;
     cloudBot.investAmount = saved.investAmount || 10;
@@ -1198,6 +1200,7 @@ function initCloudBot() {
     cloudBot.activeSignal = saved.activeSignal || null;
     cloudBot.activeAssetId = saved.activeAssetId !== undefined ? Number(saved.activeAssetId) : 74;
     cloudBot.activeAssetName = saved.activeAssetName || "XAUUSD";
+    cloudBot.currency = saved.currency || "USD";
     
     // MT5 Specific
     cloudBot.mt5Server = saved.mt5Server || "";
@@ -1322,6 +1325,7 @@ app.get("/api/cloud-bot/status", (req, res) => {
       activeSignal: cloudBot.activeSignal,
       activeAssetId: cloudBot.activeAssetId,
       activeAssetName: cloudBot.activeAssetName,
+      currency: cloudBot.currency,
       
       // MT5 Specific
       mt5Server: cloudBot.mt5Server,
@@ -1565,9 +1569,13 @@ app.post("/api/mt5/connect", async (req, res) => {
   cloudBot.brokerLoginId = loginid;
   cloudBot.brokerEmail = "mt5_user@local.app";
   
-  // Set simulated balance if real balance isn't supplied
-  if (cloudBot.balance === 10000 || !cloudBot.balance) {
-    cloudBot.balance = accountType === "demo" ? 10000 : 2500.50;
+  // Set simulated balance based on accountType
+  if (accountType === "real") {
+    if (cloudBot.balance === 10000 || !cloudBot.balance) {
+      cloudBot.balance = 2500.50;
+    }
+  } else {
+    cloudBot.balance = 10000.00;
   }
   
   saveCloudBotState();
@@ -1666,7 +1674,8 @@ app.post("/api/mt5/signal-webhook", (req, res) => {
       brokerLoginId: cloudBot.brokerLoginId,
       brokerName: cloudBot.brokerName,
       brokerEmail: cloudBot.brokerEmail || "mt5_user@local.app",
-      accountType: cloudBot.accountType
+      accountType: cloudBot.accountType,
+      mt5Server: cloudBot.mt5Server
     });
   }
   
@@ -1821,11 +1830,12 @@ async function startServer() {
   setInterval(() => {
     if (cloudBot.status === "connected") {
       const msSinceLastWebhook = Date.now() - (cloudBot.lastWebhookCandleReceivedAt || 0);
-      if (msSinceLastWebhook > 15000) {
+      // Wait at least 180 seconds (3 minutes) of no EA webhooks before falling back to Binance!
+      if (msSinceLastWebhook > 180000) {
         backfillRealGoldCandles();
       }
     }
-  }, 10000);
+  }, 30000);
 
   if (process.env.NODE_ENV !== "production") {
     console.log("Starting server in development mode with Vite middleware...");
@@ -1911,7 +1921,31 @@ async function startServer() {
       try {
         const data = JSON.parse(message.toString());
         
-        if (data.name === "ssid") {
+        if (data.name === "mt5-auth") {
+          console.log(`[WS Proxy] MT5 Client Authenticated. Login ID: ${data.loginid} (${data.accountType})`);
+          // Sync bot state immediately to this client
+          clientWs.send(JSON.stringify({
+            name: "cloud-bot-sync",
+            status: cloudBot.status,
+            errorMsg: cloudBot.errorMsg,
+            accountType: cloudBot.accountType,
+            autoTrade: cloudBot.autoTrade,
+            investAmount: cloudBot.investAmount,
+            balance: cloudBot.balance,
+            brokerEmail: cloudBot.brokerEmail,
+            brokerName: cloudBot.brokerName,
+            brokerLoginId: cloudBot.brokerLoginId,
+            trades: cloudBot.trades,
+            candles: cloudBot.candles,
+            activeSignal: cloudBot.activeSignal,
+            activeAssetId: cloudBot.activeAssetId,
+            activeAssetName: cloudBot.activeAssetName,
+            currency: cloudBot.currency,
+            mt5Server: cloudBot.mt5Server,
+            mt5Login: cloudBot.mt5Login
+          }));
+        }
+        else if (data.name === "ssid") {
           const ssid = data.msg;
           if (data.accountType !== undefined) {
             cloudBot.accountType = data.accountType;

@@ -221,6 +221,56 @@ export default function App() {
     checkCloudBotStatus();
   }, []);
 
+  // Periodic polling interval to sync live state with server (robust fallback for WS proxy failures)
+  useEffect(() => {
+    if (connectionMode !== "live") return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/cloud-bot/status");
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.success && json.data) {
+          const bot = json.data;
+          
+          if (bot.status === "connected") {
+            setBalance(bot.balance);
+            setAutoTrade(bot.autoTrade);
+            if (bot.trades) {
+              setTrades(bot.trades);
+            }
+            if (bot.candles && bot.candles.length > 0) {
+              setCandles(bot.candles);
+            }
+            if (bot.activeSignal) {
+              setActiveSignal(bot.activeSignal);
+            }
+            if (bot.brokerLoginId) {
+              setBrokerAccountInfo(prev => ({
+                server: bot.mt5Server || bot.brokerServer || prev?.server || "MT5 Server",
+                loginid: bot.brokerLoginId,
+                is_virtual: bot.accountType === "demo",
+                balance: bot.balance,
+                currency: bot.currency || "USD"
+              }));
+            }
+          } else {
+            // Server disconnected, go back to simulation cleanly
+            setConnectionMode("simulation");
+            setConnectionStatus("disconnected");
+            setBrokerAccountInfo(null);
+            setBalance(10000);
+            setCandles(marketScenarios[0].candles);
+          }
+        }
+      } catch (err) {
+        console.error("Error polling cloud bot status:", err);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [connectionMode, marketScenarios]);
+
   // 4. AI Analysis Request Handlers
   const runAIAnalysis = async (candlesToAnalyze: Candle[]) => {
     setLoading(true);
@@ -648,6 +698,17 @@ export default function App() {
         balance: result.data?.balance || 10000.00
       });
       setBalance(result.data?.balance || 10000.00);
+      
+      if (result.data?.candles && result.data.candles.length > 0) {
+        setCandles(result.data.candles);
+      }
+      if (result.data?.activeSignal) {
+        setActiveSignal(result.data.activeSignal);
+      }
+      if (result.data?.trades) {
+        setTrades(result.data.trades);
+      }
+      
       setConnectionStatus("connected");
       setConnectionMode("live");
       

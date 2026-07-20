@@ -375,6 +375,7 @@ const cloudBot = {
   activeAssetId: 74,
   activeAssetName: "XAUUSD",
   currency: "USD",
+  lastWebhookCandleReceivedAt: 0,
   
   // MT5 Specific Bridge Parameters
   mt5Server: "",
@@ -1218,8 +1219,53 @@ function initCloudBot() {
     if (saved.status === "connected" && cloudBot.ssid) {
       console.log("[Cloud Bot] Auto-reconnecting background session...");
       connectCloudBot(cloudBot.ssid);
+    } else if (saved.status === "connected" && !cloudBot.ssid) {
+      // For MT5 session, backfill gold candles on startup
+      setTimeout(() => {
+        backfillRealGoldCandles();
+      }, 2000);
     }
   }
+}
+
+async function backfillRealGoldCandles() {
+  try {
+    console.log("[Gold Feed] Fetching real-time Gold candles from Binance PAXGUSDT...");
+    const response = await fetch("https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=1m&limit=30");
+    if (!response.ok) {
+      throw new Error(`Binance API error: ${response.statusText}`);
+    }
+    const data = await response.json() as any[];
+    if (Array.isArray(data)) {
+      const parsedCandles = data.map((c: any) => {
+        const epoch = Math.floor(c[0] / 1000);
+        return {
+          time: new Date(c[0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          open: parseFloat(c[1]),
+          high: parseFloat(c[2]),
+          low: parseFloat(c[3]),
+          close: parseFloat(c[4]),
+          epoch: epoch,
+          volume: parseFloat(c[5]) || 100
+        };
+      });
+      
+      const enriched = enrichCandlesWithEMA(parsedCandles, cloudBot.fastEmaPeriod, cloudBot.slowEmaPeriod);
+      cloudBot.candles = enriched;
+      saveCloudBotState();
+      
+      // Broadcast to all connected clients
+      cloudBot.broadcast({
+        name: "candles",
+        msg: { data: cloudBot.candles }
+      });
+      console.log(`[Gold Feed] Backfilled ${enriched.length} real gold candles successfully.`);
+      return true;
+    }
+  } catch (err: any) {
+    console.error("[Gold Feed] Failed to backfill real gold candles:", err.message || err);
+  }
+  return false;
 }
 
 // REST endpoints for Cloud Bot
@@ -1493,6 +1539,9 @@ app.post("/api/mt5/connect", (req, res) => {
   saveCloudBotState();
   addSystemLog("success", `✅ เชื่อมต่อสะพาน MT5 สำเร็จ! พอร์ต: ${loginid} | เซิร์ฟเวอร์: ${server}`);
 
+  // Trigger real Gold price backfill immediately so the chart becomes live!
+  backfillRealGoldCandles();
+
   // Broadcast to all clients
   cloudBot.broadcast({
     name: "cloud-bot-sync",
@@ -1539,6 +1588,9 @@ app.get("/api/mt5/signals", (req, res) => {
 // POST Webhook endpoint for MT5 to send real-time candlestick/tick data or order execution updates
 app.post("/api/mt5/signal-webhook", (req, res) => {
   const { type, candles, tradeId, status, profit, exitPrice, balance, equity, loginid, server, currency } = req.body;
+  
+  // Track webhook activity timestamp to prevent overlapping Binance requests
+  cloudBot.lastWebhookCandleReceivedAt = Date.now();
   
   let stateChanged = false;
   
@@ -1726,6 +1778,16 @@ async function startServer() {
       saveCloudBotState();
     }
   }, 1000);
+
+  // Periodically fetch real Gold price from Binance if we are connected to MT5 and haven't gotten recent EA webhooks
+  setInterval(() => {
+    if (cloudBot.status === "connected") {
+      const msSinceLastWebhook = Date.now() - (cloudBot.lastWebhookCandleReceivedAt || 0);
+      if (msSinceLastWebhook > 15000) {
+        backfillRealGoldCandles();
+      }
+    }
+  }, 10000);
 
   if (process.env.NODE_ENV !== "production") {
     console.log("Starting server in development mode with Vite middleware...");

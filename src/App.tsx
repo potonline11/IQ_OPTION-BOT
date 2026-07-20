@@ -281,7 +281,10 @@ export default function App() {
       if (data.name === "cloud-bot-sync") {
         if (data.status) {
           setConnectionStatus(data.status);
-          if (data.status === "disconnected") {
+          if (data.status === "connected") {
+            setConnectionMode("live");
+          } else if (data.status === "disconnected") {
+            setConnectionMode("simulation");
             // Keep the account info populated so the user is not abruptly logged out
             console.log("[Cloud Bot] State synced: disconnected. Retaining login state for manual or auto-reconnect.");
           }
